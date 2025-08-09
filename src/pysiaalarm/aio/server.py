@@ -24,6 +24,9 @@ class SIAServerTCP(BaseSIAServer):
         accounts: dict[str, SIAAccount],
         func: Callable[[SIAEvent], Awaitable[None]],
         counts: Counter,
+    raw_message_log_path: str | None = None,
+    raw_message_log_rotate_bytes: int = 1024 * 1024,
+    raw_message_log_backup_count: int = 3,
     ):
         """Create a SIA TCP Server.
 
@@ -32,7 +35,15 @@ class SIAServerTCP(BaseSIAServer):
             func Callable[[SIAEvent], None] -- Function called for each valid SIA event, that can be matched to a account.  # pylint: disable=line-too-long
             counts Counter -- counter kept by client to give insights in how many errorous events were discarded of each type.  # pylint: disable=line-too-long
         """
-        BaseSIAServer.__init__(self, accounts, counts, async_func=func)
+        BaseSIAServer.__init__(
+            self,
+            accounts,
+            counts,
+            async_func=func,
+            raw_message_log_path=raw_message_log_path,
+            raw_message_log_rotate_bytes=raw_message_log_rotate_bytes,
+            raw_message_log_backup_count=raw_message_log_backup_count,
+        )
 
     async def handle_line(
         self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter
@@ -69,6 +80,9 @@ class SIAServerUDP(BaseSIAServer, asyncio.DatagramProtocol):
         accounts: dict[str, SIAAccount],
         func: Callable[[SIAEvent], Awaitable[None]],
         counts: Counter,
+    raw_message_log_path: str | None = None,
+    raw_message_log_rotate_bytes: int = 1024 * 1024,
+    raw_message_log_backup_count: int = 3,
     ):
         """Create a SIA UDP Server.
 
@@ -78,7 +92,15 @@ class SIAServerUDP(BaseSIAServer, asyncio.DatagramProtocol):
             func {Callable[[SIAEvent], None]} -- Function called for each valid SIA event, that can be matched to a account.  # pylint: disable=line-too-long
             counts {Counter} -- counter kept by client to give insights in how many errorous events were discarded of each type.  # pylint: disable=line-too-long
         """
-        BaseSIAServer.__init__(self, accounts, counts, async_func=func)
+        BaseSIAServer.__init__(
+            self,
+            accounts,
+            counts,
+            async_func=func,
+            raw_message_log_path=raw_message_log_path,
+            raw_message_log_rotate_bytes=raw_message_log_rotate_bytes,
+            raw_message_log_backup_count=raw_message_log_backup_count,
+        )
         self.transport: asyncio.DatagramTransport | None = None
 
     def connection_made(self, transport: asyncio.BaseTransport) -> None:

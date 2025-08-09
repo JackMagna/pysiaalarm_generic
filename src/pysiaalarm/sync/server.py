@@ -26,6 +26,9 @@ class SIATCPServer(ThreadingTCPServer, BaseSIAServer):
         accounts: dict[str, SIAAccount],
         func: Callable[[SIAEvent], None],
         counts: Counter,
+    raw_message_log_path: str | None = None,
+    raw_message_log_rotate_bytes: int = 1024 * 1024,
+    raw_message_log_backup_count: int = 3,
     ):
         """Create a SIA TCP Server.
 
@@ -36,7 +39,15 @@ class SIATCPServer(ThreadingTCPServer, BaseSIAServer):
             counts Counter -- counter kept by client to give insights in how many errorous events were discarded of each type.  # pylint: disable=line-too-long
         """
         ThreadingTCPServer.__init__(self, server_address, SIATCPHandler)
-        BaseSIAServer.__init__(self, accounts, counts, func=func)
+        BaseSIAServer.__init__(
+            self,
+            accounts,
+            counts,
+            func=func,
+            raw_message_log_path=raw_message_log_path,
+            raw_message_log_rotate_bytes=raw_message_log_rotate_bytes,
+            raw_message_log_backup_count=raw_message_log_backup_count,
+        )
 
 
 class SIAUDPServer(ThreadingUDPServer, BaseSIAServer):
@@ -51,6 +62,9 @@ class SIAUDPServer(ThreadingUDPServer, BaseSIAServer):
         accounts: dict[str, SIAAccount],
         func: Callable[[SIAEvent], None],
         counts: Counter,
+    raw_message_log_path: str | None = None,
+    raw_message_log_rotate_bytes: int = 1024 * 1024,
+    raw_message_log_backup_count: int = 3,
     ):
         """Create a SIA UDP Server.
 
@@ -61,4 +75,12 @@ class SIAUDPServer(ThreadingUDPServer, BaseSIAServer):
             counts Counter -- counter kept by client to give insights in how many errorous events were discarded of each type.  # pylint: disable=line-too-long
         """
         ThreadingUDPServer.__init__(self, server_address, SIAUDPHandler)
-        BaseSIAServer.__init__(self, accounts, counts, func=func)
+        BaseSIAServer.__init__(
+            self,
+            accounts,
+            counts,
+            func=func,
+            raw_message_log_path=raw_message_log_path,
+            raw_message_log_rotate_bytes=raw_message_log_rotate_bytes,
+            raw_message_log_backup_count=raw_message_log_backup_count,
+        )

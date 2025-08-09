@@ -1,7 +1,13 @@
-"""This is the base class with the handling logic for both sia_servers."""
+"""This is the base class with the handling logic for both sia_servers.
+
+Adds optional logging of raw incoming SIA lines to a file (rotating).
+This helps external systems (e.g., Home Assistant) analyze the inbound
+messages and derive a mapping to virtual sensors.
+"""
 from __future__ import annotations
 
 import logging
+from logging.handlers import RotatingFileHandler
 from abc import ABC
 from collections.abc import Awaitable, Callable
 
@@ -31,6 +37,9 @@ class BaseSIAServer(ABC):
         counts: Counter,
         func: Callable[[SIAEvent], None] | None = None,
         async_func: Callable[[SIAEvent], Awaitable[None]] | None = None,
+        raw_message_log_path: str | None = None,
+        raw_message_log_rotate_bytes: int = 1024 * 1024,
+        raw_message_log_backup_count: int = 3,
     ):
         """Create a SIA Server.
 
@@ -38,12 +47,46 @@ class BaseSIAServer(ABC):
             accounts Dict[str, SIAAccount] -- accounts as dict with account_id as key, SIAAccount object as value.  # pylint: disable=line-too-long
             func Callable[[SIAEvent], None] -- Function called for each valid SIA event, that can be matched to a account.  # pylint: disable=line-too-long
             counts Counter -- counter kept by client to give insights in how many errorous EventsType were discarded of each type.  # pylint: disable=line-too-long
+            raw_message_log_path str | None -- If provided, all incoming raw SIA lines will be appended to this file via a rotating file handler. No effect when None.
+            raw_message_log_rotate_bytes int -- Max size in bytes before rotating the raw message log. Default 1 MiB.
+            raw_message_log_backup_count int -- Number of rotated backup files to keep. Default 3.
         """
         self.accounts = accounts
         self.func = func
         self.async_func = async_func
         self.counts = counts
         self.shutdown_flag = False
+        # Optional raw message logger (thread-safe via logging's own lock)
+        self._raw_logger: logging.Logger | None = None
+        if raw_message_log_path:
+            try:
+                raw_logger = logging.getLogger(f"{__name__}.raw")
+                raw_logger.setLevel(logging.INFO)
+                # Avoid duplicate handlers if multiple servers are created.
+                # Reuse existing handler if already configured for same path.
+                handler_found = False
+                for h in raw_logger.handlers:
+                    if isinstance(h, RotatingFileHandler) and getattr(h, 'baseFilename', None) == raw_message_log_path:
+                        handler_found = True
+                        break
+                if not handler_found:
+                    handler = RotatingFileHandler(
+                        raw_message_log_path,
+                        maxBytes=raw_message_log_rotate_bytes,
+                        backupCount=raw_message_log_backup_count,
+                        encoding="utf-8",
+                    )
+                    formatter = logging.Formatter(
+                        fmt="%(asctime)s %(message)s",
+                        datefmt="%Y-%m-%d %H:%M:%S",
+                    )
+                    handler.setFormatter(formatter)
+                    raw_logger.addHandler(handler)
+                # Do not propagate to root to avoid duplicating output.
+                raw_logger.propagate = False
+                self._raw_logger = raw_logger
+            except Exception as exp:  # pragma: no cover
+                _LOGGER.error("Failed to configure raw message logger: %s", exp)
 
     def parse_and_check_event(self, data: bytes) -> EventsType | None:
         """Parse and check the line and create the event, check the account and define the response.
@@ -59,6 +102,12 @@ class BaseSIAServer(ABC):
         line = str.strip(data.decode("ascii", errors="ignore"))
         if not line:
             return None
+        # Optionally log raw incoming line for external consumption (e.g., HA download)
+        if self._raw_logger is not None:
+            try:
+                self._raw_logger.info("%s", line)
+            except Exception:  # pragma: no cover
+                pass
         self.log_and_count(COUNTER_EVENTS, line=line)
         try:
             event = SIAEvent.from_line(line, self.accounts)
