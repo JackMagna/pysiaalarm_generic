@@ -1,7 +1,7 @@
 """This is the base class with the handling logic for both sia_servers.
 
 Adds optional logging of raw incoming SIA lines to a file (rotating).
-This helps external systems (e.g., Home Assistant) analyze the inbound
+Questo aiuta sistemi esterni ad analizzare i messaggi in ingresso
 messages and derive a mapping to virtual sensors.
 """
 from __future__ import annotations

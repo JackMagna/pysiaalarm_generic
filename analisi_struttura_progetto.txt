@@ -1,0 +1,42 @@
+# Analisi e struttura del progetto pysiaalarm_generic
+
+## Obiettivo
+Il progetto è pensato per essere un framework generico per la ricezione e gestione di messaggi SIA, compatibile con qualsiasi sistema di allarme che utilizza questo protocollo (es. HESA). Non implementa logiche di interpretazione o creazione di entità specifiche: queste saranno aggiunte in una fase successiva.
+
+## Struttura della repository
+
+- **README.md / README.rst**: Documentazione principale e di supporto.
+- **CHANGELOG.rst**: Elenco delle modifiche.
+- **LICENSE.txt**: Licenza d’uso.
+- **setup.py, pyproject.toml, setup.cfg, tox.ini, pytest.ini**: File di configurazione per installazione, test e packaging.
+- **AUTHORS.rst**: Autori del progetto.
+
+### Cartella `docs/`
+Documentazione estesa, changelog, licenza, requisiti, file di configurazione Sphinx per la generazione della documentazione.
+
+### Cartella `src/pysiaalarm/`
+- `__init__.py`: Inizializzazione del modulo.
+- `account.py`: Definizione della classe/account SIA.
+- `base_client.py`: Client TCP generico per ricezione messaggi SIA.
+- `base_server.py`: Server TCP generico per ricezione messaggi SIA.
+- `const.py`: Costanti usate nel protocollo.
+- `errors.py`: Gestione degli errori.
+- `event.py`: Definizione degli eventi SIA.
+- `py.typed`: Supporto ai type hints.
+- `aio/`: Implementazioni asincrone (asyncio) di client/server.
+- `data/`: Dati statici e mapping (json, codici SIA).
+- `sync/`: Implementazioni sincrone di client/server.
+- `utils/`: Utilità varie (counter, enum, regex).
+
+### Cartella `tests/`
+Test automatici per tutte le funzionalità principali (client, server, utils, gestione pacchetti SIA). Script di esempio per avviare client/server in modalità sincrona e asincrona.
+
+## Funzionamento
+Il pacchetto riceve e gestisce messaggi SIA in modo generico, senza interpretare o creare entità specifiche. Può essere integrato in Home Assistant o altri ambienti, ma non implementa automazioni o entità: si limita a ricevere, validare e inoltrare i messaggi.
+
+## Roadmap
+- Implementazione della logica di interpretazione dei messaggi SIA.
+- Creazione di entità e automazioni specifiche in base ai loghi/messaggi ricevuti.
+- Integrazione avanzata con Home Assistant e altri ambienti.
+
+Per ulteriori dettagli o chiarimenti, consultare la documentazione o chiedere direttamente.

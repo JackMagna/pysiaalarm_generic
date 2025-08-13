@@ -15,4 +15,6 @@
     "editor.formatOnSave": true,
     "python.formatting.provider": "black",
     "python.terminal.activateEnvInCurrentTerminal": true,
+    "python-envs.defaultEnvManager": "ms-python.python:system",
+    "python-envs.pythonProjects": [],
 }
