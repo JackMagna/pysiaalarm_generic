@@ -1,0 +1,11 @@
+{
+    "domain": "pysiaalarm",
+    "name": "pySIAAlarm Custom Component",
+    "documentation": "https://github.com/JackMagna/pysiaalarm_generic",
+    "requirements": [],
+    "dependencies": [],
+    "codeowners": [
+        "@JackMagna"
+    ],
+    "version": "1.0.0"
+}

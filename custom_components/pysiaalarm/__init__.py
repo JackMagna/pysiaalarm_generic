@@ -1,0 +1,1 @@
+# Inizializzazione componente custom pysiaalarm
