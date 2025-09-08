@@ -1,0 +1,24 @@
+{
+    "config": {
+        "step": {
+            "user": {
+                "title": "Configura pySIAAlarm",
+                "description": "Inserisci i dettagli per la connessione al sistema di allarme SIA",
+                "data": {
+                    "host": "Host (indirizzo IP)",
+                    "port": "Porta",
+                    "account_id": "Account ID SIA",
+                    "encryption_key": "Chiave di cifratura (opzionale)"
+                }
+            }
+        },
+        "error": {
+            "cannot_connect": "Impossibile connettersi al sistema di allarme",
+            "invalid_auth": "Account ID o chiave di cifratura non validi",
+            "unknown": "Errore sconosciuto"
+        },
+        "abort": {
+            "already_configured": "Account già configurato"
+        }
+    }
+}

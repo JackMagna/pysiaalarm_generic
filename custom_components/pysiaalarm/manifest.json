@@ -1,11 +1,16 @@
 {
     "domain": "pysiaalarm",
-    "name": "pySIAAlarm Custom Component q",
+    "name": "pySIAAlarm Integration",
     "documentation": "https://github.com/JackMagna/pysiaalarm_generic",
-    "requirements": [],
+    "requirements": [
+        "pysiaalarm"
+    ],
     "dependencies": [],
+    "config_flow": true,
     "codeowners": [
         "@JackMagna"
     ],
-    "version": "1.0.0"
+    "version": "1.0.0",
+    "iot_class": "local_push",
+    "issue_tracker": "https://github.com/JackMagna/pysiaalarm_generic/issues"
 }
