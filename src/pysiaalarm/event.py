@@ -313,20 +313,24 @@ class SIAEvent(BaseEvent):
     @property
     def valid_timestamp(self) -> bool:
         """Check if the timestamp is within bounds."""
-        if not self.sia_account:  # pragma: no cover
-            return True
-        if self.sia_account.allowed_timeband is None:  # pragma: no cover
-            return True
-        if self.timestamp and isinstance(self.timestamp, datetime):
-            current_time = datetime.now(self.sia_account.device_timezone)
-            current_min = current_time - timedelta(
-                seconds=self.sia_account.allowed_timeband[0]
-            )
-            current_plus = current_time + timedelta(
-                seconds=self.sia_account.allowed_timeband[1]
-            )
-            return current_min <= self.timestamp <= current_plus
-        return True  # pragma: no cover
+        # PATCH: Sempre True per permettere debug/mappatura eventi con timestamp vecchi
+        return True
+        
+        # Codice originale commentato:
+        # if not self.sia_account:  # pragma: no cover
+        #     return True
+        # if self.sia_account.allowed_timeband is None:  # pragma: no cover
+        #     return True
+        # if self.timestamp and isinstance(self.timestamp, datetime):
+        #     current_time = datetime.now(self.sia_account.device_timezone)
+        #     current_min = current_time - timedelta(
+        #         seconds=self.sia_account.allowed_timeband[0]
+        #     )
+        #     current_plus = current_time + timedelta(
+        #         seconds=self.sia_account.allowed_timeband[1]
+        #     )
+        #     return current_min <= self.timestamp <= current_plus
+        # return True  # pragma: no cover
 
     def create_response(self) -> bytes:
         """Create a response message, based on account, event and response type.

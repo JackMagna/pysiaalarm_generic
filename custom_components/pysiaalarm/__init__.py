@@ -71,20 +71,25 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # Crea account SIA
     account = SIAAccount(account_id, encryption_key)
     
-    # Inizializza dati condivisi
+    # Inizializza dati condivisi PRIMA di definire l'handler
     sia_data = SIAAlarmData(None)
     
+    # Definisce l'handler per eventi SIA PRIMA del try
+    async def async_event_handler(event: SIAEvent):
+        """Handler asincrono per eventi SIA."""
+        _LOGGER.info("🔥 EVENTO SIA RICEVUTO: %s", event)
+        # Forza il processing anche con timestamp vecchi
+        _LOGGER.info("📅 Timestamp evento: %s (ignorando validità)", getattr(event, 'timestamp', 'N/A'))
+        sia_data._on_sia_event(event)
+    
+    # Verifica che la funzione sia effettivamente una coroutine
+    import asyncio
+    _LOGGER.info("🔍 Verifica handler: asyncio.iscoroutinefunction() = %s", 
+                asyncio.iscoroutinefunction(async_event_handler))
+
     # Crea client SIA
     try:
         _LOGGER.info("Creazione client SIA su %s:%s per account %s", host, port, account_id)
-        
-        # Wrapper asincrono per il callback - DEVE essere async def
-        async def async_event_handler(event: SIAEvent):
-            """Handler asincrono per eventi SIA."""
-            _LOGGER.info("🔥 EVENTO SIA RICEVUTO: %s", event)
-            # Forza il processing anche con timestamp vecchi
-            _LOGGER.info("📅 Timestamp evento: %s (ignorando validità)", getattr(event, 'timestamp', 'N/A'))
-            sia_data._on_sia_event(event)
         
         # Crea il client con impostazioni più permissive
         client = SIAClient(
