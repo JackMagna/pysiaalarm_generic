@@ -39,10 +39,13 @@ class SIAAlarmData:
     
     def _on_sia_event(self, event: SIAEvent):
         """Gestisce eventi SIA ricevuti."""
-        _LOGGER.debug("Evento SIA ricevuto: %s", event)
+        _LOGGER.info("🎯 Processando evento SIA: %s", event)
+        _LOGGER.debug("Dettagli evento - Tipo: %s, Attributi: %s", type(event), dir(event))
+        
         self.events.append(event)
         
         # Notifica tutti i listeners in modo thread-safe
+        _LOGGER.debug("Notifica a %d listeners", len(self.listeners))
         for listener in self.listeners:
             try:
                 # Chiama il listener (può essere sync o async)
@@ -71,28 +74,45 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     
     # Crea account SIA
     account = SIAAccount(account_id, encryption_key)
+    _LOGGER.info("Account SIA creato: %s (encryption: %s)", account_id, "Sì" if encryption_key else "No")
     
     # Inizializza dati condivisi
     sia_data = SIAAlarmData(None)
     
     # Crea client SIA asincrono
     try:
+        _LOGGER.info("Creazione client SIA su %s:%s per account %s", host, port, account_id)
+        
         # Wrapper asincrono per il callback
-        async def async_event_handler(event: SIAEvent):
-            """Wrapper asincrono per gestire eventi SIA."""
+        def sync_event_handler(event: SIAEvent):
+            """Handler sincrono per eventi SIA."""
+            _LOGGER.info("🔥 EVENTO SIA RICEVUTO: %s", event)
             sia_data._on_sia_event(event)
         
         client = SIAClient(
             host=host,
             port=port,
             accounts=[account],
-            function=async_event_handler
+            function=sync_event_handler
         )
         sia_data.client = client
         
-        # Avvia il client asincrono
-        await client.start()
-        _LOGGER.info("Client SIA avviato su %s:%s per account %s", host, port, account_id)
+        # Avvia il client asincrono in background
+        _LOGGER.info("Avvio client SIA in background...")
+        
+        # Test connessione porta
+        import socket
+        try:
+            test_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            test_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            test_socket.bind((host, port))
+            test_socket.close()
+            _LOGGER.info("✅ Porta %s:%s disponibile per binding", host, port)
+        except OSError as err:
+            _LOGGER.warning("⚠️ Possibile problema con porta %s:%s: %s", host, port, err)
+        
+        hass.async_create_task(client.start())
+        _LOGGER.info("✅ Task client SIA creato su %s:%s per account %s", host, port, account_id)
         
     except Exception as err:
         _LOGGER.error("Errore setup client SIA: %s", err)
