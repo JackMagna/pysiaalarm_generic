@@ -45,8 +45,10 @@ async def validate_input(hass: HomeAssistant, data: dict[str, Any]) -> dict[str,
     return {"title": f"SIA Alarm {account_id}"}
 
 
-class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
+class ConfigFlow(config_entries.ConfigFlow):
     """Handle a config flow per pySIAAlarm."""
+
+    domain = DOMAIN
 
     VERSION = 1
 

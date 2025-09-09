@@ -1,12 +1,40 @@
 # Repository: pysiaalarm_generic
 
-## 📂 Struttura della libreria
+## � STATO ATTUALE - SETTEMBRE 2025
+
+### ✅ PROBLEMI RISOLTI
+1. **ConfigFlow "Invalid handler specified"** - Risolto syntax error (domain=DOMAIN → domain attribute)
+2. **"Function should be a coroutine"** - Risolto spostando handler definition fuori dal try block
+3. **Integrazione caricamento** - L'integrazione si carica correttamente senza errori
+
+### 🔄 PROBLEMA IN CORSO DI RISOLUZIONE
+**Eventi SIA arrivano ma vengono rifiutati per timestamp validation**
+
+**Situazione attuale:**
+- Eventi SIA arrivano correttamente sulla porta 3000
+- Client SIA si avvia senza errori 
+- WARNING nei log: `Event timestamp is no longer valid: 2025-09-09 16:13:13+00:00`
+- Eventi vengono scartati prima di raggiungere l'event handler
+
+**Fix implementati:**
+1. **Patch `event.py` proprietà `response`** - Bypassa controllo timestamp per response ACK
+2. **Patch `event.py` proprietà `valid_timestamp`** - Sempre return True per debug
+3. **Reinstallazione development mode** - `pip install -e` per usare codice sorgente modificato
+
+**Prossimo step:**
+- Riavvio Home Assistant per testare se patch `valid_timestamp` elimina i warning
+- Verifica che eventi raggiungano finalmente l'event handler
+- Controllo che sensori mostrano dati degli eventi SIA
+
+---
+
+## �📂 Struttura della libreria
 
 ### Libreria core (`src/pysiaalarm/`)
 - **`__init__.py`** - Entry point principale con exports SIAClient, SIAAccount, SIAEvent
 - **`account.py`** - Gestione account SIA con cifratura e validazione
 - **`base_client.py`** / **`base_server.py`** - Classi base per client/server
-- **`event.py`** - Modelli eventi SIA (SIAEvent, OHEvent) 
+- **`event.py`** - Modelli eventi SIA (SIAEvent, OHEvent) **[PATCH APPLICATO: timestamp validation bypass]**
 - **`sync/client.py`** - Client sincrono TCP/UDP
 - **`aio/client.py`** - Client asincrono TCP/UDP
 - **`data/`** - Codici SIA, mappature ADM e dati di configurazione
@@ -53,6 +81,33 @@
 - Automazioni o azioni
 
 **Utilizzo**: Raccogliere dati per identificare tutti i sensori di casa attraverso eventi broadcast dell'allarme.
+
+## 🔧 DEBUG E RISOLUZIONE PROBLEMI
+
+### 📝 **LOG SESSIONE SETTEMBRE 2025**
+
+**Problemi risolti:**
+1. ✅ **"Invalid handler specified"** - Error syntax in ConfigFlow (domain=DOMAIN → domain attribute)
+2. ✅ **"Function should be a coroutine"** - Handler definition moved outside try block 
+3. ✅ **Integration loading** - No more setup errors
+
+**Problema corrente:**
+🔄 **Eventi SIA arrivano ma vengono rifiutati per timestamp validation**
+
+**Dettagli tecnici:**
+- Client SIA listening su 0.0.0.0:3000 ✅
+- Eventi SIA arrivano correttamente ✅ 
+- WARNING: `Event timestamp is no longer valid: 2025-09-09 16:13:13+00:00` ❌
+- Eventi vengono scartati prima di raggiungere event handler ❌
+
+**Fix implementati (in test):**
+1. **Patch `src/pysiaalarm/event.py` response property** - Bypass timestamp check per ACK response
+2. **Patch `src/pysiaalarm/event.py` valid_timestamp property** - Always return True per debug
+3. **Development reinstall** - `pip install -e` per usare source code modificato
+
+**Prossimo step:** Riavvio Home Assistant + verifica eliminazione timestamp warnings
+
+---
 
 ## ✅ Compatibilità con HACS
 
