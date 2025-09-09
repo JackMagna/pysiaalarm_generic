@@ -82,14 +82,24 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         async def async_event_handler(event: SIAEvent):
             """Handler asincrono per eventi SIA."""
             _LOGGER.info("🔥 EVENTO SIA RICEVUTO: %s", event)
+            # Forza il processing anche con timestamp vecchi
+            _LOGGER.info("📅 Timestamp evento: %s (ignorando validità)", getattr(event, 'timestamp', 'N/A'))
             sia_data._on_sia_event(event)
         
+        # Crea il client con impostazioni più permissive
         client = SIAClient(
             host=host,
             port=port,
             accounts=[account],
             function=async_event_handler
         )
+        
+        # Modifica il client per accettare timestamp vecchi
+        # Patchamo il metodo di validazione timestamp se esiste
+        if hasattr(client, '_server') and hasattr(client._server, 'allowed_timeframe'):
+            client._server.allowed_timeframe = 86400  # 24 ore invece del default
+            _LOGGER.info("⏰ Timeframe esteso a 24 ore per accettare eventi vecchi")
+        
         sia_data.client = client
         
         # Avvia il client asincrono in background
@@ -100,6 +110,20 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         # Test che il client sia effettivamente avviato
         import asyncio
         await asyncio.sleep(1)  # Breve pausa per permettere l'avvio
+        
+        # Prova a modificare il timeframe dopo l'avvio
+        try:
+            if hasattr(client, '_server'):
+                if hasattr(client._server, 'allowed_timeframe'):
+                    client._server.allowed_timeframe = 86400  # 24 ore
+                    _LOGGER.info("⏰ Timeframe server esteso a 24 ore")
+                else:
+                    _LOGGER.info("⚠️ Attributo allowed_timeframe non trovato")
+            else:
+                _LOGGER.info("⚠️ Attributo _server non trovato")
+        except Exception as e:
+            _LOGGER.info("⚠️ Non è stato possibile modificare il timeframe: %s", e)
+        
         _LOGGER.info("🎯 Client SIA dovrebbe essere in ascolto su %s:%s", host, port)
         
     except Exception as err:
