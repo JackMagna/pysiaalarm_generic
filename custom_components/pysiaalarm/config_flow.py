@@ -11,7 +11,6 @@ from homeassistant.const import CONF_HOST, CONF_PORT, CONF_NAME
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.data_entry_flow import FlowResult
 from homeassistant.exceptions import HomeAssistantError
-from homeassistant.helpers import selector
 from homeassistant.util.network import is_valid_listen_port
 
 from pysiaalarm import SIAAccount, InvalidAccountLengthError, InvalidKeyLengthError
@@ -29,24 +28,10 @@ DEFAULT_PORT = 7777
 STEP_USER_DATA_SCHEMA = vol.Schema(
     {
         vol.Required(CONF_NAME, default=DEFAULT_NAME): str,
-        vol.Required(CONF_HOST, default=DEFAULT_HOST): selector.TextSelector(),
-        vol.Required(CONF_PORT, default=DEFAULT_PORT): selector.NumberSelector(
-            selector.NumberSelectorConfig(
-                min=1, max=65535, mode=selector.NumberSelectorMode.BOX
-            )
-        ),
-        vol.Required(CONF_ACCOUNT_ID, default="005544"): selector.TextSelector(
-            selector.TextSelectorConfig(
-                type=selector.TextSelectorType.TEXT,
-                placeholder="Account ID (3-16 caratteri hex)"
-            )
-        ),
-        vol.Optional(CONF_ENCRYPTION_KEY): selector.TextSelector(
-            selector.TextSelectorConfig(
-                type=selector.TextSelectorType.PASSWORD,
-                placeholder="Chiave AES (16/24/32 caratteri, opzionale)"
-            )
-        ),
+        vol.Required(CONF_HOST, default=DEFAULT_HOST): str,
+        vol.Required(CONF_PORT, default=DEFAULT_PORT): int,
+        vol.Required(CONF_ACCOUNT_ID, default="005544"): str,
+        vol.Optional(CONF_ENCRYPTION_KEY): str,
     }
 )
 
@@ -159,19 +144,11 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                 vol.Optional(
                     "ping_interval",
                     default=self.config_entry.options.get("ping_interval", 30),
-                ): selector.NumberSelector(
-                    selector.NumberSelectorConfig(
-                        min=10, max=300, step=5, mode=selector.NumberSelectorMode.BOX
-                    )
-                ),
+                ): int,
                 vol.Optional(
                     "zones_to_monitor",
                     default=self.config_entry.options.get("zones_to_monitor", ""),
-                ): selector.TextSelector(
-                    selector.TextSelectorConfig(
-                        placeholder="1,2,3,4 (vuoto = tutte le zone)"
-                    )
-                ),
+                ): str,
             }
         )
 
