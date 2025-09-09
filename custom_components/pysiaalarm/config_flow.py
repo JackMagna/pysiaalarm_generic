@@ -20,6 +20,9 @@ from .const import DOMAIN, CONF_ACCOUNT_ID, CONF_ENCRYPTION_KEY
 
 _LOGGER = logging.getLogger(__name__)
 
+# Log di debug per verificare che il file venga caricato
+_LOGGER.info("Caricamento config_flow.py per dominio: %s", DOMAIN)
+
 DEFAULT_NAME = "SIA Alarm Panel"
 DEFAULT_HOST = "0.0.0.0"
 DEFAULT_PORT = 7777
@@ -75,10 +78,11 @@ async def validate_input(hass: HomeAssistant, data: dict[str, Any]) -> dict[str,
     }
 
 
-class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
+class ConfigFlow(config_entries.ConfigFlow):
     """Handle a config flow per pySIAAlarm."""
 
     VERSION = 1
+    domain = DOMAIN
 
     @staticmethod
     @callback
