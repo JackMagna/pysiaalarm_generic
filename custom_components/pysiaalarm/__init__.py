@@ -58,12 +58,15 @@ async def async_setup(hass: HomeAssistant, config: dict[str, Any]) -> bool:
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Setup di una config entry."""
-    _LOGGER.debug("Setup entry: %s", entry.data)
+    _LOGGER.info("🚀 AVVIO SETUP PYSIAALARM per entry: %s", entry.data)
     
     host = entry.data[CONF_HOST]
     port = entry.data[CONF_PORT]
     account_id = entry.data[CONF_ACCOUNT_ID]
     encryption_key = entry.data.get(CONF_ENCRYPTION_KEY)
+    
+    _LOGGER.info("📋 Configurazione: Host=%s, Port=%s, Account=%s, Encryption=%s", 
+                host, port, account_id, "Sì" if encryption_key else "No")
     
     # Crea account SIA
     account = SIAAccount(account_id, encryption_key)
@@ -90,9 +93,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         sia_data.client = client
         
         # Avvia il client asincrono in background
-        _LOGGER.info("Avvio client SIA in background...")
+        _LOGGER.info("🔄 Avvio client SIA in background...")
         hass.async_create_task(client.start())
         _LOGGER.info("✅ Task client SIA creato su %s:%s per account %s", host, port, account_id)
+        
+        # Test che il client sia effettivamente avviato
+        import asyncio
+        await asyncio.sleep(1)  # Breve pausa per permettere l'avvio
+        _LOGGER.info("🎯 Client SIA dovrebbe essere in ascolto su %s:%s", host, port)
         
     except Exception as err:
         _LOGGER.error("Errore setup client SIA: %s", err)
