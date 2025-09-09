@@ -132,12 +132,20 @@ class BaseSIAServer(ABC):
 
     async def async_func_wrap(self, event: EventsType | None) -> None:
         """Wrap the user function in a try."""
+        _LOGGER.info("🔍 DEBUG async_func_wrap: event=%s, type=%s", event, type(event))
+        if event is not None and hasattr(event, 'response'):
+            _LOGGER.info("🔍 DEBUG response: %s", event.response)
         if (
             event is None
             or not (isinstance(event, SIAEvent))
             or event.response != ResponseType.ACK
         ):
+            _LOGGER.info("🔍 DEBUG: evento scartato nel wrapper - event_none=%s, not_SIAEvent=%s, response_not_ACK=%s", 
+                        event is None, 
+                        not isinstance(event, SIAEvent) if event else "N/A",
+                        event.response != ResponseType.ACK if event and hasattr(event, 'response') else "N/A")
             return
+        _LOGGER.info("🔍 DEBUG: chiamando callback utente")
         self.counts.increment_valid_events()
         try:
             assert self.async_func is not None
