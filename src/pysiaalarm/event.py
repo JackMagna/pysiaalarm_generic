@@ -277,8 +277,9 @@ class SIAEvent(BaseEvent):
             return ResponseType.DUH
         if not self.sia_account:
             return ResponseType.NAK  # pragma: no cover
-        if not self.valid_timestamp:
-            return ResponseType.NAK
+        # PATCH: Ignora controllo timestamp per permettere debug/mappatura
+        # if not self.valid_timestamp:
+        #     return ResponseType.NAK
         if self.extended_data is not None:  # pragma: no cover
             if [x for x in self.extended_data if x.identifier in RSP_XDATA]:
                 return ResponseType.RSP
