@@ -22,14 +22,12 @@ async def async_setup_entry(
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Setup sensori da config entry - Solo monitoraggio per mappatura futura."""
-    _LOGGER.info("Setup sensori SIA per account: %s", config_entry.data.get('account_id'))
     sia_data = hass.data[DOMAIN][config_entry.entry_id]
     
     entities = [
         SIAEventMonitorSensor(sia_data, config_entry),
         SIAEventLogSensor(sia_data, config_entry),
     ]
-    _LOGGER.info("Creati %d sensori SIA", len(entities))
     async_add_entities(entities)
 
 
@@ -44,11 +42,8 @@ class SIAEventMonitorSensor(SensorEntity):
         self._unique_codes = set()
         self._unique_zones = set()
         
-        _LOGGER.info("Inizializzo sensore monitor SIA per %s", config_entry.data.get('account_id'))
-        
         # Registra listener per eventi SIA
         self._sia_data.add_listener(self._handle_sia_event)
-        _LOGGER.info("Listener registrato per sensore monitor")
 
     @property
     def name(self) -> str:
