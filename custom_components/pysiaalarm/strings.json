@@ -3,22 +3,47 @@
         "step": {
             "user": {
                 "title": "Configura pySIAAlarm",
-                "description": "Inserisci i dettagli per la connessione al sistema di allarme SIA",
+                "description": "Configura la connessione al sistema di allarme SIA.\n\nPer maggiori informazioni, consulta la [documentazione]({docs_url}).",
                 "data": {
-                    "host": "Host (indirizzo IP)",
+                    "name": "Nome",
+                    "host": "Host",
                     "port": "Porta",
-                    "account_id": "Account ID SIA",
-                    "encryption_key": "Chiave di cifratura (opzionale)"
+                    "account_id": "Account ID",
+                    "encryption_key": "Chiave di cifratura"
+                },
+                "data_description": {
+                    "name": "Nome descrittivo per questa configurazione SIA",
+                    "host": "Indirizzo IP su cui ascoltare (0.0.0.0 per tutte le interfacce)",
+                    "port": "Porta TCP su cui il sistema di allarme invierà messaggi SIA",
+                    "account_id": "ID Account configurato nel sistema di allarme (3-16 caratteri hex)",
+                    "encryption_key": "Chiave AES per messaggi cifrati (16/24/32 caratteri, opzionale)"
                 }
             }
         },
         "error": {
-            "cannot_connect": "Impossibile connettersi al sistema di allarme",
+            "cannot_connect": "Impossibile connettersi: porta già in uso o indirizzo non valido",
             "invalid_auth": "Account ID o chiave di cifratura non validi",
+            "invalid_port": "Numero porta non valido (1-65535)",
             "unknown": "Errore sconosciuto"
         },
         "abort": {
             "already_configured": "Account già configurato"
+        }
+    },
+    "options": {
+        "step": {
+            "init": {
+                "title": "Opzioni pySIAAlarm",
+                "description": "Configura opzioni avanzate per il monitoraggio SIA.",
+                "data": {
+                    "ping_interval": "Intervallo ping",
+                    "zones_to_monitor": "Zone da monitorare"
+                },
+                "data_description": {
+                    "ping_interval": "Intervallo in secondi per verificare connessione (10-300)",
+                    "zones_to_monitor": "Lista zone separate da virgola (vuoto = tutte)"
+                }
+            }
         }
     }
 }

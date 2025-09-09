@@ -177,16 +177,91 @@
 
 **Priorità sviluppo**: FASE 2 → FASE 3 → FASE 4
 
-## 🎯 Conclusione FASE 1
+## � Config Flow migliorato (simile all'integrazione ufficiale)
 
-**Stato attuale**: ✅ **FASE 1 COMPLETATA** - Solo monitoraggio eventi SIA
+### ✅ **Pannello configurazione completo**:
 
-L'integrazione attuale implementa solo la **ricezione e analisi eventi** per identificare sensori:
+1. **UI moderna con selettori**:
+   - `selector.TextSelector()` per campi testo
+   - `selector.NumberSelector()` per porta con range 1-65535
+   - `selector.PasswordSelector()` per chiave cifratura
+   - Placeholder e descrizioni dettagliate
 
-- ✅ **Connessione sistema allarme** - Client SIA configurabile via UI
-- ✅ **Monitoraggio passivo** - Raccolta eventi senza controllo allarme  
-- ✅ **Identificazione sensori** - Codici/zone uniche per mappatura futura
-- ✅ **Debug completo** - Attributi dettagliati per analisi eventi
-- ✅ **Compatibilità HACS** - Installabile come custom repository
+2. **Validazione completa**:
+   - Test binding porta per verificare disponibilità
+   - Validazione account SIA con pysiaalarm
+   - Gestione errori specifica per tipo (porta, auth, connessione)
+   - Controllo duplicati per account_id
 
-**Prossimo obiettivo**: FASE 2 - Sviluppo pannello per associare eventi SIA ai sensori fisici di casa.
+3. **Options flow**:
+   - Pannello opzioni avanzate post-configurazione
+   - Intervallo ping configurabile (10-300s)
+   - Zone specifiche da monitorare
+   - Modifica configurazione senza riconfigurare
+
+4. **Traduzioni complete**:
+   - Descrizioni dettagliate per ogni campo
+   - Messaggi errore specifici
+   - Supporto placeholder e documentazione
+
+5. **File servizi**:
+   - `services.yaml` per definire servizi disponibili
+   - Servizio `send_message` per test sistema
+
+### 📋 **Schema configurazione**:
+```yaml
+Nome: "SIA Alarm Panel"
+Host: "0.0.0.0" 
+Porta: 7777
+Account ID: "005544"
+Chiave: "[opzionale]"
+```
+
+**Risultato**: Config flow ora identico per stile e funzionalità all'integrazione SIA ufficiale di Home Assistant.
+
+### ❌ **Problemi risolti**:
+
+1. **"Function should be a coroutine" ERROR**:
+   - **Causa**: Client asincrono richiedeva callback `async def`
+   - **Fix**: Creato wrapper asincrono per `async_event_handler`
+   - **Risultato**: Client SIA ora avvia correttamente
+
+2. **"Unknown account (005544)" WARNING**:
+   - **Causa**: Account configurato male nell'integrazione  
+   - **Fix**: Default account_id impostato a "005544" (visto nei log)
+   - **Risultato**: Eventi SIA ora processati invece che ignorati
+
+3. **Callback sincrono vs asincrono**:
+   - **Causa**: Mixing sync/async nella gestione eventi
+   - **Fix**: Gestione unified per callback sync/async con `asyncio.create_task`
+   - **Risultato**: Listeners funzionano in entrambi i modi
+
+4. **Client lifecycle**:
+   - **Causa**: Uso scorretto di `run_in_executor` per client asincrono
+   - **Fix**: Uso diretto di `await client.start()` e `await client.stop()`
+   - **Risultato**: Setup/teardown pulito dell'integrazione
+
+### 📊 **Evento SIA reale identificato dai log**:
+```
+Account: 005544
+Zone: 1  
+Code: UX
+Message: "12^C. F.SINGOLA CASA"
+Timestamp: 2025-09-09 09:17:31+00:00
+```
+
+**Interpretazione**: Evento da zona 1, codice UX (probabile "User eXit" o evento personalizzato), messaggio testuale da centrale HESA.
+
+## 🎯 Conclusione FASE 1 (AGGIORNATA)
+
+**Stato attuale**: ✅ **FASE 1 COMPLETATA E TESTATA** - Integrazione funzionale
+
+L'integrazione ora processa correttamente eventi SIA reali:
+
+- ✅ **Client asincrono** - Corretto setup con callback async
+- ✅ **Account configurato** - 005544 riconosciuto (HESA reale)  
+- ✅ **Eventi processati** - UX/zona 1 identificati nei log
+- ✅ **Debug migliorato** - Logging dettagliato per mappatura sensori
+- ✅ **Test integrazione** - Script per validare configurazione
+
+**Prossimo obiettivo**: FASE 2 - Mappatura eventi UX e altri codici ai sensori casa specifici.

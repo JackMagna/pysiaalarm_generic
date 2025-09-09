@@ -1,0 +1,24 @@
+send_message:
+  name: Invia messaggio SIA
+  description: Invia un messaggio SIA di test al sistema di allarme
+  fields:
+    account_id:
+      name: Account ID
+      description: ID dell'account SIA a cui inviare il messaggio
+      required: true
+      selector:
+        text:
+    message:
+      name: Messaggio
+      description: Messaggio SIA da inviare
+      required: true
+      selector:
+        text:
+    zone:
+      name: Zona
+      description: Numero zona (opzionale)
+      required: false
+      selector:
+        number:
+          min: 1
+          max: 999

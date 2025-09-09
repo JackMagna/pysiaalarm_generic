@@ -6,7 +6,7 @@ import logging
 from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import CONF_HOST, CONF_PORT, Platform
+from homeassistant.const import CONF_HOST, CONF_PORT, CONF_NAME, Platform
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryNotReady
 
@@ -42,10 +42,14 @@ class SIAAlarmData:
         _LOGGER.debug("Evento SIA ricevuto: %s", event)
         self.events.append(event)
         
-        # Notifica tutti i listeners
+        # Notifica tutti i listeners in modo thread-safe
         for listener in self.listeners:
             try:
-                listener(event)
+                # Chiama il listener (può essere sync o async)
+                if asyncio.iscoroutinefunction(listener):
+                    asyncio.create_task(listener(event))
+                else:
+                    listener(event)
             except Exception as err:
                 _LOGGER.error("Errore nel listener SIA: %s", err)
 
@@ -71,18 +75,24 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # Inizializza dati condivisi
     sia_data = SIAAlarmData(None)
     
-    # Crea client SIA
+    # Crea client SIA asincrono
     try:
+        # Wrapper asincrono per il callback
+        async def async_event_handler(event: SIAEvent):
+            """Wrapper asincrono per gestire eventi SIA."""
+            sia_data._on_sia_event(event)
+        
         client = SIAClient(
             host=host,
             port=port,
             accounts=[account],
-            function=sia_data._on_sia_event
+            function=async_event_handler
         )
         sia_data.client = client
         
-        # Avvia il client in background
-        await asyncio.get_event_loop().run_in_executor(None, client.start)
+        # Avvia il client asincrono
+        await client.start()
+        _LOGGER.info("Client SIA avviato su %s:%s per account %s", host, port, account_id)
         
     except Exception as err:
         _LOGGER.error("Errore setup client SIA: %s", err)
@@ -101,11 +111,12 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload di una config entry."""
     _LOGGER.debug("Unload entry: %s", entry.entry_id)
     
-    # Ferma il client SIA
+    # Ferma il client SIA asincrono
     if entry.entry_id in hass.data[DOMAIN]:
         sia_data: SIAAlarmData = hass.data[DOMAIN][entry.entry_id]
         if sia_data.client:
-            await asyncio.get_event_loop().run_in_executor(None, sia_data.client.stop)
+            await sia_data.client.stop()
+            _LOGGER.info("Client SIA fermato per account %s", entry.data[CONF_ACCOUNT_ID])
     
     # Unload platforms
     unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)

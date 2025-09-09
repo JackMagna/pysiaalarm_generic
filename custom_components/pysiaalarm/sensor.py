@@ -86,9 +86,11 @@ class SIAEventMonitorSensor(SensorEntity):
         if hasattr(event, 'zone') and event.zone:
             self._unique_zones.add(str(event.zone))
         
-        _LOGGER.info("Evento SIA ricevuto - Codice: %s, Zona: %s", 
+        _LOGGER.info("🏠 EVENTO SIA - Codice: %s, Zona: %s, Account: %s, Message: %s", 
                     getattr(event, 'code', 'N/A'), 
-                    getattr(event, 'zone', 'N/A'))
+                    getattr(event, 'zone', 'N/A'),
+                    getattr(event, 'account', 'N/A'),
+                    getattr(event, 'message', 'N/A'))
         self.schedule_update_ha_state()
 
     async def async_will_remove_from_hass(self) -> None:
