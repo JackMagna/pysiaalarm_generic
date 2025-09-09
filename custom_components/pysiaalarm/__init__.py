@@ -73,16 +73,26 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     
     # Crea client SIA
     try:
+        _LOGGER.info("Creazione client SIA su %s:%s per account %s", host, port, account_id)
+        
+        # Wrapper asincrono per il callback - DEVE essere async def
+        async def async_event_handler(event: SIAEvent):
+            """Handler asincrono per eventi SIA."""
+            _LOGGER.info("🔥 EVENTO SIA RICEVUTO: %s", event)
+            sia_data._on_sia_event(event)
+        
         client = SIAClient(
             host=host,
             port=port,
             accounts=[account],
-            function=sia_data._on_sia_event
+            function=async_event_handler
         )
         sia_data.client = client
         
-        # Avvia il client in background
-        await asyncio.get_event_loop().run_in_executor(None, client.start)
+        # Avvia il client asincrono in background
+        _LOGGER.info("Avvio client SIA in background...")
+        hass.async_create_task(client.start())
+        _LOGGER.info("✅ Task client SIA creato su %s:%s per account %s", host, port, account_id)
         
     except Exception as err:
         _LOGGER.error("Errore setup client SIA: %s", err)
