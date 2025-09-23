@@ -10,8 +10,8 @@ from homeassistant.const import CONF_HOST, CONF_PORT, CONF_NAME, Platform
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryNotReady
 
-from pysiaalarm import SIAAccount, SIAEvent
-from pysiaalarm.aio import SIAClient
+from .sia import SIAAccount, SIAEvent
+from .sia.aio import SIAClient
 
 from .const import DOMAIN, CONF_ACCOUNT_ID, CONF_ENCRYPTION_KEY
 

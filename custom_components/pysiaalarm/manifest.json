@@ -3,7 +3,7 @@
     "name": "pySIAAlarm Integration",
     "documentation": "https://github.com/JackMagna/pysiaalarm_generic",
     "requirements": [
-        "pysiaalarm"
+        "pytz"
     ],
     "dependencies": [],
     "config_flow": true,

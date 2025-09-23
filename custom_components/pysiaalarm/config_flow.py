@@ -11,7 +11,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResult
 from homeassistant.exceptions import HomeAssistantError
 
-from pysiaalarm import SIAAccount, InvalidAccountLengthError, InvalidKeyLengthError
+from .sia import SIAAccount, InvalidAccountLengthError, InvalidKeyLengthError
 
 from .const import DOMAIN, CONF_ACCOUNT_ID, CONF_ENCRYPTION_KEY
 

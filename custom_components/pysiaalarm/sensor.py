@@ -9,7 +9,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from pysiaalarm import SIAEvent
+from .sia import SIAEvent
 
 from .const import DOMAIN
 
