@@ -313,24 +313,32 @@ class SIAEvent(BaseEvent):
     @property
     def valid_timestamp(self) -> bool:
         """Check if the timestamp is within bounds."""
-        # PATCH: Sempre True per permettere debug/mappatura eventi con timestamp vecchi
-        return True
-        
-        # Codice originale commentato:
-        # if not self.sia_account:  # pragma: no cover
-        #     return True
-        # if self.sia_account.allowed_timeband is None:  # pragma: no cover
-        #     return True
-        # if self.timestamp and isinstance(self.timestamp, datetime):
-        #     current_time = datetime.now(self.sia_account.device_timezone)
-        #     current_min = current_time - timedelta(
-        #         seconds=self.sia_account.allowed_timeband[0]
-        #     )
-        #     current_plus = current_time + timedelta(
-        #         seconds=self.sia_account.allowed_timeband[1]
-        #     )
-        #     return current_min <= self.timestamp <= current_plus
-        # return True  # pragma: no cover
+        # PATCH: Tolleranza di 5 minuti per eventi SIA con timestamp skew
+        if not self.sia_account:  # pragma: no cover
+            return True
+        if self.sia_account.allowed_timeband is None:  # pragma: no cover
+            return True
+        if self.timestamp and isinstance(self.timestamp, datetime):
+            current_time = datetime.now(self.sia_account.device_timezone)
+            
+            # TOLLERANZA ESTESA: 5 minuti (300 secondi) invece dei valori originali
+            tolerance_seconds = 300  # 5 minuti di tolleranza
+            current_min = current_time - timedelta(seconds=tolerance_seconds)
+            current_plus = current_time + timedelta(seconds=tolerance_seconds)
+            
+            is_valid = current_min <= self.timestamp <= current_plus
+            
+            # Log per debug quando timestamp non è valido anche con tolleranza estesa
+            if not is_valid:
+                import logging
+                _LOGGER = logging.getLogger(__name__)
+                _LOGGER.debug(
+                    "Timestamp fuori tolleranza 5min: evento=%s, corrente=%s, diff=%s",
+                    self.timestamp, current_time, abs((self.timestamp - current_time).total_seconds())
+                )
+            
+            return is_valid
+        return True  # pragma: no cover
 
     def create_response(self) -> bytes:
         """Create a response message, based on account, event and response type.
