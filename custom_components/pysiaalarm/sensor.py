@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import logging
 from typing import Any
+from datetime import datetime
 
 from homeassistant.components.sensor import SensorEntity
 from homeassistant.config_entries import ConfigEntry
@@ -29,6 +30,42 @@ async def async_setup_entry(
         SIAEventLogSensor(sia_data, config_entry),
     ]
     async_add_entities(entities)
+
+    # Create dynamic sensors for known codes (persisted)
+    dynamic_entities = []
+    created_codes = set()
+    try:
+        for code, info in sia_data.codes.items():
+            dynamic_entities.append(SIAEventCodeSensor(sia_data, config_entry, code))
+            created_codes.add(code)
+        # Sensor that lists all known codes
+        dynamic_entities.append(SIAKnownCodesSensor(sia_data, config_entry))
+    except Exception:
+        dynamic_entities = []
+
+    if dynamic_entities:
+        async_add_entities(dynamic_entities)
+
+    # Provide a callback so sia_data can request creation of a sensor when a new code is added
+    def _entity_adder(code: str) -> None:
+        # run in the event loop
+        if code in created_codes:
+            return
+        created_codes.add(code)
+        try:
+            hass.async_create_task(_async_add_code_entity(code))
+        except Exception:
+            pass
+
+    async def _async_add_code_entity(code: str) -> None:
+        try:
+            ent = SIAEventCodeSensor(sia_data, config_entry, code)
+            async_add_entities([ent])
+            _LOGGER.info("Creato sensore dinamico per codice SIA: %s", code)
+        except Exception as e:
+            _LOGGER.error("Errore creazione sensore dinamico per %s: %s", code, e)
+
+    sia_data.entity_adder = _entity_adder
 
 
 class SIAEventMonitorSensor(SensorEntity):
@@ -139,23 +176,56 @@ class SIAEventLogSensor(SensorEntity):
                 "account_id": self._config_entry.data["account_id"],
                 "status": "In attesa primo evento"
             }
-        
-        # Raccoglie tutti gli attributi disponibili dell'evento
-        attrs = {
+        # Raccoglie solo campi semplici e serializzabili dell'evento per evitare
+        # problemi con JSON serialization (es. SIAAccount, tzinfo non serializzabili)
+        attrs: dict[str, Any] = {
             "account_id": self._config_entry.data["account_id"],
             "raw_event": str(self._last_event),
         }
-        
-        # Aggiunge tutti gli attributi dell'evento SIA
-        for attr in dir(self._last_event):
-            if not attr.startswith('_') and hasattr(self._last_event, attr):
+
+        # Lista di campi dell'evento che vogliamo esportare nello stato (se presenti)
+        keys = [
+            "account",
+            "code",
+            "ri",
+            "zone",
+            "message",
+            "ti",
+            "id",
+            "x_data",
+            "timestamp",
+            "line",
+            "receiver",
+            "sequence",
+            "calc_crc",
+            "message_type",
+        ]
+
+        for key in keys:
+            if hasattr(self._last_event, key):
                 try:
-                    value = getattr(self._last_event, attr)
-                    if not callable(value):
-                        attrs[f"event_{attr}"] = value
-                except:
-                    pass
-        
+                    val = getattr(self._last_event, key)
+                    # Converti datetime in string ISO
+                    if isinstance(val, datetime):
+                        attrs[f"event_{key}"] = val.isoformat()
+                        continue
+                    # Se è un oggetto account o ha account_id, serializziamo solo l'id
+                    if hasattr(val, "account_id"):
+                        try:
+                            attrs[f"event_{key}"] = getattr(val, "account_id")
+                            continue
+                        except Exception:
+                            pass
+                    # Se è un tipo semplice lo aggiungiamo direttamente
+                    if isinstance(val, (str, int, float, bool, list, dict)) or val is None:
+                        attrs[f"event_{key}"] = val
+                    else:
+                        # Fallback: rappresentazione testuale
+                        attrs[f"event_{key}"] = str(val)
+                except Exception:
+                    # Non blocchiamo l'aggiornamento dello stato per un attributo non serializzabile
+                    attrs[f"event_{key}"] = "<unserializable>"
+
         return attrs
 
     def _handle_sia_event(self, event: SIAEvent) -> None:
@@ -166,3 +236,59 @@ class SIAEventLogSensor(SensorEntity):
     async def async_will_remove_from_hass(self) -> None:
         """Cleanup quando il sensore viene rimosso."""
         self._sia_data.remove_listener(self._handle_sia_event)
+
+
+
+class SIAKnownCodesSensor(SensorEntity):
+    """Sensor that lists all known codes persisted."""
+
+    def __init__(self, sia_data, config_entry):
+        self._sia_data = sia_data
+        self._config_entry = config_entry
+
+    @property
+    def name(self) -> str:
+        return f"SIA Known Codes {self._config_entry.data['account_id']}"
+
+    @property
+    def unique_id(self) -> str:
+        return f"sia_known_codes_{self._config_entry.data['account_id']}"
+
+    @property
+    def state(self) -> int:
+        return len(self._sia_data.codes)
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        return {"codes": list(self._sia_data.codes.keys())}
+
+
+class SIAEventCodeSensor(SensorEntity):
+    """Sensor per un singolo codice SIA rilevato durante learning."""
+
+    def __init__(self, sia_data, config_entry, code: str):
+        self._sia_data = sia_data
+        self._config_entry = config_entry
+        self._code = str(code)
+
+    @property
+    def name(self) -> str:
+        return f"SIA Code {self._code} {self._config_entry.data['account_id']}"
+
+    @property
+    def unique_id(self) -> str:
+        return f"sia_code_{self._config_entry.data['account_id']}_{self._code}"
+
+    @property
+    def state(self) -> int:
+        entry = self._sia_data.codes.get(self._code)
+        return entry.get("count", 0) if entry else 0
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        entry = self._sia_data.codes.get(self._code, {})
+        return {
+            "zones": list(entry.get("zones", [])),
+            "last_seen": entry.get("last_seen"),
+            "samples": entry.get("samples", []),
+        }

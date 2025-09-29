@@ -12,12 +12,16 @@ from homeassistant.exceptions import ConfigEntryNotReady
 
 from .sia import SIAAccount, SIAEvent
 from .sia.aio import SIAClient
+from typing import Coroutine
+from homeassistant.helpers import storage
 
 from .const import DOMAIN, CONF_ACCOUNT_ID, CONF_ENCRYPTION_KEY
 
 _LOGGER = logging.getLogger(__name__)
 
 PLATFORMS = [Platform.SENSOR]
+STORE_VERSION = 1
+STORAGE_KEY = DOMAIN + ".codes"
 
 
 class SIAAlarmData:
@@ -27,6 +31,10 @@ class SIAAlarmData:
         self.client = client
         self.events: list[SIAEvent] = []
         self.listeners: list[callable] = []
+        self.codes: dict[str, dict] = {}
+        self.learning: bool = False
+        self._hass = None
+        self.entity_adder = None
     
     def add_listener(self, callback: callable):
         """Aggiunge un listener per eventi SIA."""
@@ -41,13 +49,99 @@ class SIAAlarmData:
         """Gestisce eventi SIA ricevuti."""
         _LOGGER.debug("Evento SIA ricevuto: %s", event)
         self.events.append(event)
-        
+        # Se siamo in learning mode, registra il codice per persistenza
+        if self.learning and hasattr(event, 'code') and event.code:
+            try:
+                self.add_code(event.code, getattr(event, 'zone', None), event.full_message)
+            except Exception as err:
+                _LOGGER.error("Errore registrazione codice in learning mode: %s", err)
+
         # Notifica tutti i listeners
         for listener in self.listeners:
             try:
                 listener(event)
             except Exception as err:
                 _LOGGER.error("Errore nel listener SIA: %s", err)
+
+    def add_code(self, code: str, zone: str | None = None, sample: str | None = None) -> None:
+        """Aggiunge o aggiorna un codice rilevato e programma il salvataggio asincrono."""
+        now = None
+        try:
+            from datetime import datetime
+            now = datetime.now().isoformat()
+        except Exception:
+            now = None
+
+        entry = self.codes.get(code, {"count": 0, "zones": set(), "last_seen": None, "samples": []})
+        entry["count"] += 1
+        if zone is not None:
+            try:
+                entry["zones"].add(str(zone))
+            except Exception:
+                entry["zones"] = set(list(entry.get("zones", [])) + [str(zone)])
+        entry["last_seen"] = now
+        if sample:
+            samples = entry.get("samples", [])
+            samples.insert(0, sample)
+            entry["samples"] = samples[:10]
+        self.codes[code] = entry
+
+        # schedule async save
+        if self._hass:
+            try:
+                self._hass.async_create_task(self.async_save_codes())
+            except Exception as e:
+                _LOGGER.debug("Impossibile schedulare salvataggio codici: %s", e)
+        # If we have an entity adder callback, request creation of a new sensor for this code
+        try:
+            if self.entity_adder and callable(self.entity_adder):
+                # pass code only; entity_adder should handle dedup
+                self.entity_adder(code)
+        except Exception as e:
+            _LOGGER.debug("Errore chiamata entity_adder: %s", e)
+
+    async def async_save_codes(self) -> None:
+        """Salva i codici nel storage di Home Assistant."""
+        if not self._hass:
+            return
+        try:
+            store = storage.Store(self._hass, STORE_VERSION, STORAGE_KEY)
+            # convert set to list for JSON
+            serializable = {
+                k: {**v, "zones": list(v.get("zones", []))} for k, v in self.codes.items()
+            }
+            await store.async_save(serializable)
+            _LOGGER.debug("Codici SIA salvati: %s", list(serializable.keys()))
+        except Exception as e:
+            _LOGGER.error("Errore salvataggio codici: %s", e)
+
+    async def async_load_codes(self, hass) -> None:
+        """Carica i codici dal storage di Home Assistant."""
+        self._hass = hass
+        try:
+            store = storage.Store(hass, STORE_VERSION, STORAGE_KEY)
+            data = await store.async_load()
+            if data:
+                # convert zones back to set
+                for k, v in data.items():
+                    v["zones"] = set(v.get("zones", []))
+                self.codes = data
+                _LOGGER.info("Caricati %d codici SIA dallo storage", len(self.codes))
+            else:
+                self.codes = {}
+        except Exception as e:
+            _LOGGER.error("Errore caricamento codici: %s", e)
+
+    def start_learning(self) -> None:
+        self.learning = True
+
+    def stop_learning(self) -> None:
+        self.learning = False
+
+    def clear_codes(self) -> None:
+        self.codes = {}
+        if self._hass:
+            self._hass.async_create_task(self.async_save_codes())
 
 
 async def async_setup(hass: HomeAssistant, config: dict[str, Any]) -> bool:
@@ -143,6 +237,26 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # Salva dati nell'hass
     hass.data[DOMAIN][entry.entry_id] = sia_data
     
+    # Carica codici persi dallo storage
+    await sia_data.async_load_codes(hass)
+
+    # Registra servizi per learning mode e gestione codici
+    async def _start_learning(call):
+        sia_data.start_learning()
+        _LOGGER.info("SIA learning mode avviato")
+
+    async def _stop_learning(call):
+        sia_data.stop_learning()
+        _LOGGER.info("SIA learning mode fermato")
+
+    async def _clear_codes(call):
+        sia_data.clear_codes()
+        _LOGGER.info("SIA codice list pulita")
+
+    hass.services.async_register(DOMAIN, "start_learning", _start_learning)
+    hass.services.async_register(DOMAIN, "stop_learning", _stop_learning)
+    hass.services.async_register(DOMAIN, "clear_codes", _clear_codes)
+
     # Setup platforms
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     
