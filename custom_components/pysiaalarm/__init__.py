@@ -69,7 +69,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 host, port, account_id, "Sì" if encryption_key else "No")
     
     # Crea account SIA
-    account = SIAAccount(account_id, encryption_key)
+    # NOTE: imposto `allowed_timeband=None` per bypassare temporaneamente
+    # la validazione del timestamp nella libreria durante il debug.
+    # Questo evita che eventi legittimi vengano scartati se ci sono
+    # discrepanze di orologio o comportamenti diversi nella versione
+    # installata della libreria. Rimuovere o modificare dopo fix permanente.
+    account = SIAAccount(account_id, encryption_key, allowed_timeband=None)
     
     # Inizializza dati condivisi PRIMA di definire l'handler
     sia_data = SIAAlarmData(None)
