@@ -1,0 +1,174 @@
+Eseguo una ricerca veloce per trovare dove nel codice è usato pkg_resources e resource_stream, così da proporre una patch precisa per eliminare I/O bloccante o sostituirlo con importlib.resources. Mi aspetto di trovare riferimenti nel codice installato o in file di packaging. Verranno mostrati i risultati.
+
+Ora apro config_flow.py per vedere quali impostazioni esporre e come integrare l'opzione di tolleranza timestamp. Questo mi permette di proporre la patch completa (integration + library changes). Chiamo lo strumento per leggere il file.
+
+Lettura config_flow.py
+
+Procedo con due riepiloghi distinti come hai chiesto: (A) un sommario delle proposte e come preferisco riceverle/implementarle, e (B) un riepilogo focalizzato sulla correzione del bug (timestamp + I/O bloccante) con piano di implementazione concreto e passi da eseguire. Alla fine trovi anche lo stato attuale (cosa ho già applicato qui) e comandi veloci per testare/riavviare.
+A — Riepilogo delle proposte e come preferisco riceverle/implementarle
+
+Obiettivo: raccogliere e consegnare cambiamenti in modo chiaro, testabile e tracciabile.
+
+Proposte principali (sintesi breve)
+
+    Fix rapido (temp): bypass temporaneo della validazione timestamp per debug (già applicato localmente come stop-gap).
+    Fix lato integrazione HA: aggiungere opzione in config_flow per tolleranza timestamp (o flag “ignore timestamp”) e passare il valore all’account/client.
+    Fix lato libreria (permanente):
+        Rendere la validazione del timestamp configurabile (es. attributo timestamp_tolerance_seconds su 
+
+SIAAccount).
+Normalizzare il naming di
+
+        allowed_timeband (documentazione/chiaro comportamento).
+    Fix I/O bloccante (perf e compatibilità Home Assistant):
+        Eliminare uso di pkg_resources.resource_stream in runtime (usare moduli Python importabili o importlib.resources o caricare i dati all’avvio in un executor).
+        Oppure distribuire il pacchetto in modo che i dati siano importati come moduli (come in src/pysiaalarm/data/*) e non tramite pkg_resources.
+    Migliorie opzionali:
+        Aggiungere test unitari per timestamp skew e per il caricamento dati non-bloccante.
+        Esporre opzioni in UI (config_flow / options_flow) per scegliere il comportamento.
+
+Come inviare/implementare le proposte (preferenze e formato)
+
+    Metodo preferito (ordine di priorità):
+        Pull request separati per ogni cambiamento logico (es. PR-1: config_flow + HA bridge; PR-2: modifica classe SIAAccount + event.valid_timestamp; PR-3: rimozione pkg_resources e test). Ogni PR:
+            Una piccola descrizione del problema e della soluzione.
+            File modificati elencati.
+            Uno o due test automatici (pytest) che verificano il comportamento (happy path + 1 edge case).
+            Aggiornamento minimale della documentazione / CHANGELOG.
+        Patch/branch su questo repository e revisione qui (posso creare branch e PR se vuoi).
+        Singole patch (diff) se preferisci rivedere prima: fornisco i diff pronti da applicare (ma PR è preferibile perché traccia e permette CI).
+    Contenuto minimo per ogni proposta da inviarmi:
+        Descrizione breve (1-2 righe) del problema.
+        Comportamento voluto (input → output).
+        File da modificare (elenco).
+        Test o comando rapido per verificare.
+    Requisiti per l’accettazione/merging:
+        Build/lint e test passati (o almeno i test nuovi e rilevanti).
+        I cambiamenti non rompono la compatibilità esistente; se lo fanno, documentare il breaking change.
+        Commit atomic (un concetto per commit).
+
+Cosa posso fare adesso (se mi dai OK)
+
+    Implementare qui la correzione completa (lato libreria + integrazione) e aggiungere test rapidi.
+    Creare le PR corrispondenti e mostrarti i cambiamenti.
+    Fornire i comandi esatti per reinstallare in editable mode e riavviare Home Assistant per testare.
+
+B — Riepilogo della correzione del bug (timestamp invalid + I/O bloccante) e piano d’implementazione concreto
+
+Problemi riscontrati (dal log + codice)
+
+    Eventi vengono scartati con warning "Event timestamp is no longer valid: 2025-09-09 ...".
+        Cause: la libreria valuta timestamp rispetto a quanto definito in 
+
+SIAAccount.allowed_timeband / valid_timestamp. Se la differenza supera la tolleranza gli eventi sono considerati non validi e quindi scartati prima di raggiungere l’handler.
+Nel codice:
+SIAEvent.valid_timestamp confronta self.timestamp con current_time basato su self.sia_account.device_timezone e ritorna True immediatamente se
+
+    self.sia_account.allowed_timeband is None.
+
+Warning di I/O bloccante:
+
+    Nei log: 
+
+Detected blocking call to open with args ('/usr/.../pysiaalarm/data/sia_codes.json', 'rb') in pkg_resources... inside the event loop
+Cause probabile: la versione installata in site-packages utilizza pkg_resources.resource_stream() che aprendo file fisici dentro l'event loop provoca warning di blocking I/O.
+Notare: nella copia del repo data.py sembra esserci già una versione che importa
+
+        SIA_CODES da un modulo Python, quindi il problema è probabilmente la versione installata in Home Assistant (non la copia src).
+
+Soluzione proposta (step concreti) Fix immediato (già eseguito qui)
+
+    Bypass temporaneo: impostare 
+
+    allowed_timeband=None per l’account creato dall’integrazione HA in __init__.py. Questo disabilita la validazione timestamp ed evita lo scarto degli eventi in attesa di un fix più elegante.
+        Stato: patch già applicata in questo workspace.
+
+Fix raccomandato e permanente (cosa implementare)
+
+    Rendere la validazione del timestamp configurabile/chiara:
+        Modifiche:
+            In account.py:
+                Aggiungere un attributo esplicito: timestamp_tolerance_seconds: int | None = 300 (o simile) invece di usare 
+
+    allowed_timeband non chiaro.
+    Documentare comportamento: None = bypass, >0 = tolleranza in secondi.
+
+In event.py:
+
+    Usare 
+
+            self.sia_account.timestamp_tolerance_seconds per confrontare il timestamp (con fallback a comportamento precedente).
+            Loggare la differenza in secondi quando l’evento è scartato (livello debug).
+        In config_flow.py e __init__.py:
+            Esporre un campo opzionale (es. CONF_TIMESTAMP_TOLERANCE) con valore di default (es. 300s); passare il valore a SIAAccount quando lo si crea.
+    Vantaggi:
+        Permette all’utente di decidere la tolleranza senza patchare il codice.
+        Più leggibile e mantenibile.
+
+Eliminare il blocking I/O:
+
+    Opzioni (scegliere 1): A) Repackaging / reinstallare in editable mode:
+        Se il codice sorgente (src/) già espone SIA_CODES come variabili Python (es. sia_codes.py con SIA_CODES dict), preferire import diretto di quel modulo invece di leggere JSON con pkg_resources. In questo repository il loader nel src già usa i moduli Python: basta usare questa versione (pip install -e .) nel runtime HA.
+        Comando consigliato (es. nell’ambiente di Home Assistant / sviluppo):
+
+B) Aggiornare loader risorse per usare importlib.resources e run_in_executor:
+
+    Cambiare ogni chiamata a pkg_resources.resource_stream(...) con importlib.resources.files(...).joinpath(...).read_bytes() oppure, se si deve leggere file pesanti in runtime, eseguire il caricamento con 
+
+            await hass.async_add_executor_job(...).
+        Raccomandazione: se stai usando la copia di src del repo, reinstallare in editable mode è la soluzione più veloce e pulita per rimuovere il pkg_resources dall’ambiente di HA.
+    Aggiungere test:
+        Unit test che simulano eventi con timestamp in skew (es. +600 s / -600 s), per verificare comportamento con diverse tolleranze.
+        Test per caricamento dati senza usare pkg_resources e senza warning di blocking I/O.
+
+Elenco file da modificare (plan dettagliato)
+
+    Lato libreria:
+        account.py
+            Aggiungere timestamp_tolerance_seconds: int | None = 300
+            Aggiornare post_init / docstring
+        event.py
+            Modificare 
+
+            valid_timestamp per usare timestamp_tolerance_seconds e log più chiaro.
+        src/pysiaalarm/data/* (solo se la versione installata usa pkg_resources):
+            In caso di uso di file JSON con pkg_resources, sostituire con moduli Python o importlib.resources oppure spostare caricamento all’avvio fuori dall’event loop.
+    Lato integrazione Home Assistant:
+        config_flow.py
+            Aggiungere campo opzionale per tolleranza timestamp (numero di secondi o "none").
+        __init__.py
+            Passare il valore scelto in config a SIAAccount (crearlo con il nuovo parametro).
+        Aggiornare manifest.json / strings.json per UI (opzionale ma consigliato).
+
+Verifica e test (comandi)
+
+    Reinstallare in editable mode e riavviare HA:
+
+Per i test in repository:
+
+    (ci sono già test in tests — esegui i test relativi all'event e account).
+
+Esempio di comportamento atteso dopo fix
+
+    Con timestamp_tolerance_seconds=300 (default): eventi con skew fino a ±5 minuti vengono accettati e passati al tuo handler.
+    Se l’utente imposta None via UI: la validazione viene bypassata (utile in mappatura iniziale).
+    Nessun warning di blocking I/O se si utilizza la copia src o si cambia il loader per usare importlib.resources in modo asincrono o eseguito in executor.
+
+Stato attuale in questo workspace (cosa ho già fatto)
+
+    Ho applicato una patch temporanea in __init__.py che crea l’account con 
+
+    allowed_timeband=None (bypass temporaneo della validazione timestamp). Questo permette agli eventi di raggiungere i listener immediatamente per debug/mappatura.
+    Ho analizzato:
+        event.py (valid_timestamp),
+        base_server.py (dove viene loggato il warning),
+        data.py (moduli di dati).
+    Ho identificato che il warning di blocking I/O proviene dalla versione installata in site-packages (usa pkg_resources). La copia src del repo non sembra usare pkg_resources, quindi reinstallare in editable mode risolve la causa nella maggioranza dei casi.
+
+Vuoi che:
+
+        Applichi ora il fix completo (modifica account.py + event.py + config_flow.py + test) e ti preparo i test e PR (posso farlo e poi lanciare i test qui)?
+        Mi limiti a generare i patch pronti per PR, così li rivedi localmente?
+        Ti do solo i comandi per reinstallare in editable mode e riavviare Home Assistant (se preferisci provare il workaround rapido che ho già applicato)?
+
+Se scegli 1) procedo subito e applico le modifiche qui, eseguo i test rapidi e riporto i risultati.

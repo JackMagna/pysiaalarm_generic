@@ -15,7 +15,11 @@ _LOGGER = logging.getLogger(__name__)
 
 # Simplified SIA message parser
 SIA_REGEX = re.compile(
-    r'"(?P<msg_type>SIA-DCS|ADM-CID|OH)"\s*(?P<line>L\d+)?\s*(?P<receiver>R\d+)?\s*#(?P<account>\w+).*'
+    # Find the quoted message type and the account id (preceded by '#') anywhere in the message.
+    # The message coming from some panels can include binary/hex prefixes or numbers between
+    # the quoted type and the line/receiver markers, so we'll extract line/receiver separately.
+    r'"(?P<msg_type>SIA-DCS|ADM-CID|OH)".*?#(?P<account>\w+)',
+    re.DOTALL,
 )
 
 
@@ -76,7 +80,8 @@ class SIAServerTCP:
     def _parse_message(self, message: str) -> SIAEvent | OHEvent | None:
         """Parse incoming SIA message into event object."""
         try:
-            match = SIA_REGEX.match(message.strip())
+            message = message.strip()
+            match = SIA_REGEX.search(message)
             if not match:
                 _LOGGER.debug("Message doesn't match SIA format: %s", message)
                 return None
@@ -84,8 +89,14 @@ class SIAServerTCP:
             groups = match.groupdict()
             msg_type = groups.get('msg_type', '')
             account_id = groups.get('account', '').upper()
-            line = groups.get('line', 'L0')
-            receiver = groups.get('receiver', 'R0')
+
+            # Some panels include numeric prefixes or other tokens before the L.. and R.. markers
+            # (for example: 6925L0 or binary/hex prefixes). Extract L and R markers separately.
+            line_search = re.search(r'L\d+', message)
+            receiver_search = re.search(r'R\d+', message)
+
+            line = line_search.group(0) if line_search else 'L0'
+            receiver = receiver_search.group(0) if receiver_search else 'R0'
 
             # Check if account is configured
             if account_id not in self.accounts:
@@ -107,7 +118,7 @@ class SIAServerTCP:
                 )
             else:
                 # Regular SIA event
-                return SIAEvent(
+                ev = SIAEvent(
                     full_message=message,
                     message_type=msg_type,
                     account=account_id,
@@ -115,9 +126,34 @@ class SIAServerTCP:
                     receiver=receiver,
                     timestamp=datetime.now(),
                     sia_account=account,
-                    code="999",  # Generic code for simplified parser
+                    code="999",  # Generic fallback code for simplified parser
                     message="SIA Event received",
                 )
+
+                # Try to extract more useful info from content between [] to help mapping
+                # e.g. '[#005544|Nri1UX12^C. F.SINGOLA    CASA            ^]'
+                try:
+                    bracket = re.search(r"\[(.*?)\]", message)
+                    if bracket:
+                        content = bracket.group(1)
+                        # try to find a 3-digit numeric code
+                        code_search = re.search(r"\b(\d{3})\b", content)
+                        if code_search:
+                            ev.code = code_search.group(1)
+
+                        # try to find 'ri' zone pattern (e.g. 'Nri1' -> zone 1)
+                        ri_search = re.search(r"[Rr]?i(\d+)", content)
+                        if ri_search:
+                            ev.ri = ri_search.group(1)
+                            # also set 'zone' attribute for sensors expecting it
+                            try:
+                                setattr(ev, 'zone', int(ev.ri))
+                            except Exception:
+                                setattr(ev, 'zone', ev.ri)
+                except Exception as err:  # pragma: no cover - defensive
+                    _LOGGER.debug("Non è stato possibile estrarre codice/zone dal messaggio: %s", err)
+
+                return ev
 
         except Exception as e:
             _LOGGER.error("Error parsing message '%s': %s", message, e)
