@@ -257,6 +257,52 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     hass.services.async_register(DOMAIN, "stop_learning", _stop_learning)
     hass.services.async_register(DOMAIN, "clear_codes", _clear_codes)
 
+    async def _export_codes(call):
+        """Export codes to CSV file.
+
+        Service data:
+        - filename (optional): path relative to HA config directory or absolute path
+        """
+        filename = call.data.get("filename") if call and call.data else None
+
+        # default filename in HA config dir
+        account = entry.data.get(CONF_ACCOUNT_ID)
+        default_name = f"pysiaalarm_codes_{account}.csv" if account else "pysiaalarm_codes.csv"
+        if filename:
+            # if relative path, write under config dir
+            import os
+            if not os.path.isabs(filename):
+                filepath = hass.config.path(filename)
+            else:
+                filepath = filename
+        else:
+            filepath = hass.config.path(default_name)
+
+        codes = sia_data.codes or {}
+
+        def _write_csv(path, codes_dict):
+            import csv
+            try:
+                with open(path, "w", newline="", encoding="utf-8") as f:
+                    writer = csv.writer(f)
+                    writer.writerow(["code", "count", "zones", "last_seen", "samples"])
+                    for code, info in sorted(codes_dict.items()):
+                        zones = ";".join(sorted(list(info.get("zones", []))))
+                        samples = "|".join(info.get("samples", [])) if info.get("samples") else ""
+                        writer.writerow([code, info.get("count", 0), zones, info.get("last_seen", ""), samples])
+                return True
+            except Exception as e:
+                _LOGGER.error("Errore scrittura CSV %s: %s", path, e)
+                return False
+
+        ok = await hass.async_add_executor_job(_write_csv, filepath, codes)
+        if ok:
+            _LOGGER.info("Codici SIA esportati in %s", filepath)
+        else:
+            _LOGGER.error("Esportazione codici SIA fallita per %s", filepath)
+
+    hass.services.async_register(DOMAIN, "export_codes", _export_codes)
+
     # Setup platforms
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     
