@@ -9,6 +9,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_HOST, CONF_PORT, CONF_NAME, Platform
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryNotReady
+from homeassistant.helpers.event import async_track_time_interval
 
 from .sia import SIAAccount, SIAEvent
 from .sia.aio import SIAClient
@@ -35,6 +36,9 @@ class SIAAlarmData:
         self.learning: bool = False
         self._hass = None
         self.entity_adder = None
+        self._auto_export_unsub = None
+        self._auto_export_interval = None
+        self._auto_export_filename = None
     
     def add_listener(self, callback: callable):
         """Aggiunge un listener per eventi SIA."""
@@ -83,7 +87,8 @@ class SIAAlarmData:
         if sample:
             samples = entry.get("samples", [])
             samples.insert(0, sample)
-            entry["samples"] = samples[:10]
+            # Keep more raw samples for better analysis
+            entry["samples"] = samples[:50]
         self.codes[code] = entry
 
         # schedule async save
@@ -142,6 +147,125 @@ class SIAAlarmData:
         self.codes = {}
         if self._hass:
             self._hass.async_create_task(self.async_save_codes())
+
+    async def async_export_codes(self, hass: HomeAssistant, filepath: str | None = None) -> bool:
+        """Export codes and raw events to CSV files (callable from outside)."""
+        try:
+            codes = self.codes or {}
+
+            # default filename
+            account = None
+            try:
+                # attempt to obtain account_id from stored client/account
+                account = None
+                # fallback: try to read from hass data if available
+            except Exception:
+                account = None
+
+                from datetime import datetime
+                ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+                default_name = f"pysiaalarm_codes_{account}_{ts}.csv" if account else f"pysiaalarm_codes_{ts}.csv"
+            if filepath:
+                fp = filepath
+            else:
+                fp = hass.config.path(default_name)
+
+            def _write_csv(path, codes_dict):
+                import csv
+                try:
+                    with open(path, "w", newline="", encoding="utf-8") as f:
+                        writer = csv.writer(f)
+                        writer.writerow(["code", "count", "zones", "last_seen", "samples"])
+                        for code, info in sorted(codes_dict.items()):
+                            zones = ";".join(sorted(list(info.get("zones", []))))
+                            samples = "|".join(info.get("samples", [])) if info.get("samples") else ""
+                            writer.writerow([code, info.get("count", 0), zones, info.get("last_seen", ""), samples])
+                    return True
+                except Exception as e:
+                    _LOGGER.error("Errore scrittura CSV %s: %s", path, e)
+                    return False
+
+            def _write_raw_csv(path, events_list):
+                import csv
+                try:
+                    with open(path, "w", newline="", encoding="utf-8") as f:
+                        writer = csv.writer(f)
+                        writer.writerow(["timestamp", "account", "code", "line", "receiver", "ri", "raw_message", "bracket_content"])
+                        for ev in events_list:
+                            try:
+                                ts = getattr(ev, 'timestamp', None)
+                                if hasattr(ts, 'isoformat'):
+                                    ts = ts.isoformat()
+                                account = getattr(ev, 'account', '')
+                                code = getattr(ev, 'code', '')
+                                line = getattr(ev, 'line', '')
+                                receiver = getattr(ev, 'receiver', '')
+                                ri = getattr(ev, 'ri', '')
+                                raw = getattr(ev, 'full_message', '')
+                                import re
+                                bracket = ''
+                                if raw:
+                                    m = re.search(r"\[(.*?)\]", raw)
+                                    if m:
+                                        bracket = m.group(1)
+                                writer.writerow([ts, account, code, line, receiver, ri, raw, bracket])
+                            except Exception:
+                                pass
+                    return True
+                except Exception as e:
+                    _LOGGER.error("Errore scrittura RAW CSV %s: %s", path, e)
+                    return False
+
+            ok = await hass.async_add_executor_job(_write_csv, fp, codes)
+            raw_path = fp.replace('.csv', '_raw.csv') if fp.endswith('.csv') else fp + '_raw.csv'
+            ok2 = await hass.async_add_executor_job(_write_raw_csv, raw_path, self.events or [])
+            if ok and ok2:
+                _LOGGER.info("Export automatico SIA completato: %s, %s", fp, raw_path)
+            else:
+                _LOGGER.error("Export automatico SIA fallito per %s", fp)
+            return ok and ok2
+        except Exception as e:
+            _LOGGER.error("Errore export_codes async: %s", e)
+            return False
+
+    def start_auto_export(self, hass: HomeAssistant, interval_seconds: int = 86400, filename: str | None = None) -> None:
+        """Start periodic export every interval_seconds seconds."""
+        # stop existing
+        try:
+            self.stop_auto_export()
+        except Exception:
+            pass
+
+        from datetime import timedelta
+
+        self._auto_export_interval = timedelta(seconds=interval_seconds)
+        self._auto_export_filename = filename
+        self._hass = hass
+
+        def _periodic(now):
+            try:
+                hass.async_create_task(self.async_export_codes(hass, self._auto_export_filename))
+            except Exception as e:
+                _LOGGER.error("Errore scheduling export automatico: %s", e)
+
+        # register
+        self._auto_export_unsub = async_track_time_interval(hass, _periodic, self._auto_export_interval)
+        _LOGGER.info("Avviato export automatico SIA ogni %s secondi", int(self._auto_export_interval.total_seconds()))
+
+    def stop_auto_export(self) -> None:
+        """Stop periodic export if running."""
+        try:
+            if self._auto_export_unsub:
+                try:
+                    self._auto_export_unsub()
+                except Exception:
+                    pass
+            self._auto_export_unsub = None
+            self._auto_export_interval = None
+            self._auto_export_filename = None
+            _LOGGER.info("Export automatico SIA fermato")
+        except Exception as e:
+            _LOGGER.error("Errore stop auto export: %s", e)
 
 
 async def async_setup(hass: HomeAssistant, config: dict[str, Any]) -> bool:
@@ -257,6 +381,18 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     hass.services.async_register(DOMAIN, "stop_learning", _stop_learning)
     hass.services.async_register(DOMAIN, "clear_codes", _clear_codes)
 
+    async def _start_auto_export(call):
+        # params: interval_seconds (int), filename (optional)
+        interval = int(call.data.get("interval_seconds", 86400)) if call and call.data else 86400
+        filename = call.data.get("filename") if call and call.data else None
+        sia_data.start_auto_export(hass, interval, filename)
+
+    async def _stop_auto_export(call):
+        sia_data.stop_auto_export()
+
+    hass.services.async_register(DOMAIN, "start_auto_export", _start_auto_export)
+    hass.services.async_register(DOMAIN, "stop_auto_export", _stop_auto_export)
+
     async def _export_codes(call):
         """Export codes to CSV file.
 
@@ -267,7 +403,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
         # default filename in HA config dir
         account = entry.data.get(CONF_ACCOUNT_ID)
-        default_name = f"pysiaalarm_codes_{account}.csv" if account else "pysiaalarm_codes.csv"
+        from datetime import datetime
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        default_name = f"pysiaalarm_codes_{account}_{ts}.csv" if account else f"pysiaalarm_codes_{ts}.csv"
         if filename:
             # if relative path, write under config dir
             import os
@@ -295,11 +433,52 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 _LOGGER.error("Errore scrittura CSV %s: %s", path, e)
                 return False
 
+        def _write_raw_csv(path, events_list):
+            import csv
+            try:
+                with open(path, "w", newline="", encoding="utf-8") as f:
+                    writer = csv.writer(f)
+                    writer.writerow(["timestamp", "account", "code", "line", "receiver", "ri", "raw_message", "bracket_content"])
+                    for ev in events_list:
+                        try:
+                            ts = getattr(ev, 'timestamp', None)
+                            if hasattr(ts, 'isoformat'):
+                                ts = ts.isoformat()
+                            account = getattr(ev, 'account', '')
+                            code = getattr(ev, 'code', '')
+                            line = getattr(ev, 'line', '')
+                            receiver = getattr(ev, 'receiver', '')
+                            ri = getattr(ev, 'ri', '')
+                            raw = getattr(ev, 'full_message', '')
+                            # try to extract bracket content
+                            import re
+                            bracket = ''
+                            if raw:
+                                m = re.search(r"\[(.*?)\]", raw)
+                                if m:
+                                    bracket = m.group(1)
+                            writer.writerow([ts, account, code, line, receiver, ri, raw, bracket])
+                        except Exception:
+                            pass
+                return True
+            except Exception as e:
+                _LOGGER.error("Errore scrittura RAW CSV %s: %s", path, e)
+                return False
+
         ok = await hass.async_add_executor_job(_write_csv, filepath, codes)
         if ok:
             _LOGGER.info("Codici SIA esportati in %s", filepath)
         else:
             _LOGGER.error("Esportazione codici SIA fallita per %s", filepath)
+
+        # Also write RAW events CSV for deeper analysis
+        raw_path = filepath.replace('.csv', '_raw.csv') if filepath.endswith('.csv') else filepath + '_raw.csv'
+        events = sia_data.events or []
+        ok2 = await hass.async_add_executor_job(_write_raw_csv, raw_path, events)
+        if ok2:
+            _LOGGER.info("RAW events SIA esportati in %s", raw_path)
+        else:
+            _LOGGER.error("Esportazione RAW events SIA fallita per %s", raw_path)
 
     hass.services.async_register(DOMAIN, "export_codes", _export_codes)
 

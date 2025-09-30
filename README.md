@@ -147,3 +147,100 @@ Consulta il file `CHANGELOG.rst` per le ultime modifiche e correzioni.
 - Implementazione della logica di interpretazione dei messaggi SIA.
 - Creazione di entità e automazioni specifiche in base ai loghi/messaggi ricevuti.
 - Integrazione avanzata con Home Assistant e altri ambienti.
+
+## Riepilogo rapido — cosa mi serve per riprendere l'implementazione
+
+Quando vuoi che io (o un altro sviluppatore) riprenda il lavoro sulle funzionalità, inviami per favore questo insieme minimo di informazioni:
+
+- Branch/git: nome del branch attivo (se diverso da `master`) e eventuale PR aperta
+- Log Home Assistant (file `home-assistant_*.log`) con i messaggi relativi all'integrazione e ai messaggi SIA
+- Esempi raw dei messaggi ricevuti dalla centrale (es. riga TCP completa così come appare nei log)
+- Config entry: `host`, `port`, `account_id` (non inviare chiavi segrete in pubblico)
+- Descrizione del comportamento atteso vs. comportamento osservato (es. quali sensori non si aggiornano)
+- Elenco di codici/zone che vorresti mappare esplicitamente (se già noti)
+
+Con questi elementi posso:
+- replicare i messaggi e i casi in unit test o test di integrazione
+- migliorare il parser e le euristiche di estrazione di `code`, `ri`, `zone`
+- creare sensori dinamici o mappature predefinite per i codici più usati
+
+## Rilasci recenti (funzionalità aggiunte)
+
+Le modifiche più recenti incluse in questa fork / integrazione standalone:
+
+- Parser SIA più permissivo: riconosce messaggi con prefissi/hex e estrae L/R separatamente
+- Estrazione euristica di contenuti tra parentesi quadre per ricavare `code`, `ri` e `zone`
+- Modalità "learning" per raccogliere codici osservati e crearne la lista persistente
+- Persistenza dei codici via Home Assistant Storage (chiave: `pysiaalarm.codes`)
+- Sensori dinamici generati per ogni codice conosciuto (creazione on-demand)
+- Sanificazione degli attributi dei sensori (solo tipi JSON-serializzabili)
+- Esportazione CSV: sintesi dei codici + file RAW con tutti gli eventi registrati
+- Avvio/stop export periodico (start_auto_export / stop_auto_export)
+- Nome file di export con timestamp (formato: `pysiaalarm_codes_YYYYMMDD_HHMMSS.csv`) per evitare sovrascritture
+- Aumento del numero di sample conservati per codice (fino a 50) per analisi
+
+## Verifica dei servizi in Home Assistant — guida passo-passo
+
+Questa guida mostra come verificare i servizi aggiunti dall'integrazione usando Developer Tools → Services nella UI di Home Assistant.
+
+1) Accedi a Home Assistant e vai su Developer Tools → Services.
+
+2) Avvia/ragiona la learning mode
+- Domain: `pysiaalarm`  
+- Service: `start_learning`  
+- Service Data: `{}`  
+
+Premi Call Service. Se vuoi fermarla:  
+- Service: `stop_learning`  
+- Service Data: `{}`
+
+3) Esporta i codici (export manuale)
+- Domain: `pysiaalarm`  
+- Service: `export_codes`  
+- Service Data (opzionale - salva con nome custom sotto la cartella di configurazione HA):
+
+	{
+		"filename": "pysiaalarm_codes_miaCasa_20250930_123000.csv"
+	}
+
+Se non fornisci `filename`, l'integrazione genererà automaticamente un file con timestamp nel formato `pysiaalarm_codes_YYYYMMDD_HHMMSS.csv` nella directory di configurazione di HA.
+
+4) Avvia export automatico periodico
+- Domain: `pysiaalarm`  
+- Service: `start_auto_export`  
+- Service Data (esempio per export ogni 24h):
+
+	{
+		"interval_seconds": 86400,
+		"filename": "pysiaalarm_codes_daily.csv"  # opzionale: se relativo, sarà salvato sotto la config dir
+	}
+
+Per fermare l'export automatico:  
+- Service: `stop_auto_export`  
+- Service Data: `{}`
+
+5) Pulire la lista di codici salvati
+- Domain: `pysiaalarm`  
+- Service: `clear_codes`  
+- Service Data: `{}`
+
+6) Controllare i file esportati
+- Dopo un export, trova i file sotto la directory di configurazione di Home Assistant (es. `/config/pysiaalarm_codes_YYYYMMDD_HHMMSS.csv` e `_raw.csv`).
+- Se non trovi i file, controlla i log di Home Assistant per messaggi `Export automatico SIA completato` o `Codici SIA esportati`.
+
+## Comandi locali utili (terminal) per debug
+
+Esempi da eseguire nella macchina che esegue Home Assistant (o nel dev container):
+
+```bash
+# Cerca i file di export nella config directory di HA
+ls -l $HOME/.homeassistant | grep pysiaalarm_codes || true
+
+# Visualizza gli ultimi log relativi a pysiaalarm
+grep -i "pysiaalarm" home-assistant_*.log | tail -n 200
+```
+
+## Note finali
+- Se vuoi che crei automaticamente mapping precisi tra codici e sensori (con nomi friendly), invia una lista iniziale di codici e la loro descrizione.
+- Se preferisci posso aggiungere la persistenza della configurazione dell'export automatico per riattivare il job dopo il riavvio di HA.
+

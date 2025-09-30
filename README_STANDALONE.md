@@ -109,3 +109,74 @@ Per migrare da una versione precedente:
 2. Rimuovere il pacchetto `pysiaalarm` se installato manualmente
 3. Installare questa versione standalone
 4. Riconfigurare l'integrazione
+
+## Riepilogo rapido — cosa fornire per riprendere lo sviluppo
+
+Se vuoi che lo sviluppo continui o venga eseguita una diagnosi più approfondita, per favore fornisci:
+
+- Branch git o PR attiva
+- Log Home Assistant (`home-assistant_*.log`) contenenti le righe relative ai messaggi ricevuti
+- Esempi raw dei messaggi TCP ricevuti (se possibile: la riga completa così come appare nei log)
+- Informazioni di configurazione: `host`, `port`, `account_id` (non inviare chiavi private pubblicamente)
+
+Questi elementi permettono di riprodurre i casi in test automatici e migliorare il parser per la tua centrale.
+
+## Novità in questo rilascio (funzionalità aggiunte)
+
+- Parser SIA più permissivo con estrazione L/R
+- Estrazione euristica di contenuto tra parentesi quadre per `code`/`ri`/`zone`
+- Modalità learning per raccogliere codici osservati e persisterli
+- Sensori dinamici per codici rilevati
+- Esportazione CSV manuale e RAW events
+- Export automatico periodico (start/stop)
+- Nome dei file di export con timestamp per evitare sovrascritture
+
+## Come testare i servizi in Home Assistant
+
+1) Avvia Home Assistant e carica l'integrazione `pysiaalarm`.
+2) Vai su Developer Tools → Services.
+
+- Start learning:
+
+    Domain: `pysiaalarm`
+    Service: `start_learning`
+    Service Data: `{}`
+
+- Stop learning:
+
+    Domain: `pysiaalarm`
+    Service: `stop_learning`
+    Service Data: `{}`
+
+- Export manuale:
+
+    Domain: `pysiaalarm`
+    Service: `export_codes`
+    Service Data (opzionale):
+
+    {
+        "filename": "pysiaalarm_codes_esempio_20250930_123000.csv"
+    }
+
+- Start auto export (ogni 24h):
+
+    Domain: `pysiaalarm`
+    Service: `start_auto_export`
+    Service Data:
+
+    {
+        "interval_seconds": 86400,
+        "filename": "pysiaalarm_codes_daily.csv"
+    }
+
+- Stop auto export:
+
+    Domain: `pysiaalarm`
+    Service: `stop_auto_export`
+    Service Data: `{}`
+
+3) Controlla i file generati nella directory di configurazione di Home Assistant.
+
+---
+
+Se vuoi, posso anche aggiungere una sezione di debug con comandi `curl` o script Python per simulare l'invio di messaggi SIA alla porta TCP del server locale.
