@@ -1,0 +1,23 @@
+# Esempio di mapping per pysiaalarm
+# Posiziona questo file in <config_dir>/pysiaalarm_mapping.yaml e riavvia Home Assistant
+# Formato:
+# default_debounce_seconds: <float>  # valore di default per debounce
+# sensors:
+#   "BRACKET LABEL EXACT MATCH":
+#     debounce_seconds: 1.5
+#     friendly_name: "Cucina"
+#   "ALTRA ETICHETTA":
+#     debounce_seconds: 2.0
+#     friendly_name: "Ingresso"
+
+default_debounce_seconds: 1.44
+sensors:
+  "P.CUCINA     CASA":
+    debounce_seconds: 1.44
+    friendly_name: "Cucina"
+  "P.INGRESSO CASA":
+    debounce_seconds: 1.44
+    friendly_name: "Ingresso"
+  "P.SEMINTERRATOGARAGE":
+    debounce_seconds: 1.44
+    friendly_name: "Garage"

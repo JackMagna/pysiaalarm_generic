@@ -1,0 +1,95 @@
+{
+  "total_events": 465,
+  "sensors": [
+    {
+      "label": "P.CUCINA CASA",
+      "sensor_type": "C",
+      "count": 176,
+      "median_delta": 0.960013,
+      "mean_delta": 493.51029732,
+      "bursts": 44,
+      "events_in_bursts": 176,
+      "pct_in_bursts": 100.0
+    },
+    {
+      "label": "P.INGRESSO CASA",
+      "sensor_type": "C",
+      "count": 144,
+      "median_delta": 0.960155,
+      "mean_delta": 526.2628953286713,
+      "bursts": 37,
+      "events_in_bursts": 144,
+      "pct_in_bursts": 100.0
+    },
+    {
+      "label": "P.SEMINTERRATOGARAGE",
+      "sensor_type": "C",
+      "count": 56,
+      "median_delta": 0.96001,
+      "mean_delta": 1339.914236490909,
+      "bursts": 14,
+      "events_in_bursts": 56,
+      "pct_in_bursts": 100.0
+    },
+    {
+      "label": "P.SALA CASA",
+      "sensor_type": "C",
+      "count": 55,
+      "median_delta": 0.9602325,
+      "mean_delta": 1434.4076908703703,
+      "bursts": 14,
+      "events_in_bursts": 55,
+      "pct_in_bursts": 100.0
+    },
+    {
+      "label": "BASCULANTE GARAGE",
+      "sensor_type": "C",
+      "count": 16,
+      "median_delta": 0.960088,
+      "mean_delta": 3289.4399946666667,
+      "bursts": 4,
+      "events_in_bursts": 16,
+      "pct_in_bursts": 100.0
+    },
+    {
+      "label": "F.BAGNO MATR.CASA",
+      "sensor_type": "C",
+      "count": 8,
+      "median_delta": 0.959505,
+      "mean_delta": 126.27457628571429,
+      "bursts": 2,
+      "events_in_bursts": 8,
+      "pct_in_bursts": 100.0
+    },
+    {
+      "label": "L 1610030200083432",
+      "sensor_type": "S",
+      "count": 4,
+      "median_delta": 0.959305,
+      "mean_delta": 0.9584896666666667,
+      "bursts": 1,
+      "events_in_bursts": 4,
+      "pct_in_bursts": 100.0
+    },
+    {
+      "label": "F.MATRIMONIALECASA",
+      "sensor_type": "C",
+      "count": 4,
+      "median_delta": 0.956897,
+      "mean_delta": 0.9590546666666667,
+      "bursts": 1,
+      "events_in_bursts": 4,
+      "pct_in_bursts": 100.0
+    },
+    {
+      "label": "P.TERRAZZA CASA",
+      "sensor_type": "C",
+      "count": 2,
+      "median_delta": 0.957757,
+      "mean_delta": 0.957757,
+      "bursts": 1,
+      "events_in_bursts": 2,
+      "pct_in_bursts": 100.0
+    }
+  ]
+}

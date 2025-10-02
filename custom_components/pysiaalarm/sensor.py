@@ -11,6 +11,8 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .sia import SIAEvent
+import re
+# entity id generation: we'll sanitize labels ourselves
 
 from .const import DOMAIN
 
@@ -35,8 +37,16 @@ async def async_setup_entry(
     dynamic_entities = []
     created_codes = set()
     try:
-        for code, info in sia_data.codes.items():
-            dynamic_entities.append(SIAEventCodeSensor(sia_data, config_entry, code))
+        # Create dynamic sensors based on mapping if available, else fallback to codes
+        try:
+            if getattr(sia_data, 'mapping', None):
+                for label, meta in sia_data.mapping.items():
+                    dynamic_entities.append(SIAEventCodeSensor(sia_data, config_entry, code=None, label=label))
+            else:
+                for code, info in sia_data.codes.items():
+                    dynamic_entities.append(SIAEventCodeSensor(sia_data, config_entry, code=code))
+        except Exception:
+            dynamic_entities = []
             created_codes.add(code)
         # Sensor that lists all known codes
         dynamic_entities.append(SIAKnownCodesSensor(sia_data, config_entry))
@@ -59,7 +69,12 @@ async def async_setup_entry(
 
     async def _async_add_code_entity(code: str) -> None:
         try:
-            ent = SIAEventCodeSensor(sia_data, config_entry, code)
+            # If mapping exists, try to find label for this code (best-effort)
+            label = None
+            if getattr(sia_data, 'mapping', None):
+                # mapping keys are labels; we do not have a reverse map here, so just create code-based sensor
+                label = None
+            ent = SIAEventCodeSensor(sia_data, config_entry, code=code, label=label)
             async_add_entities([ent])
             _LOGGER.info("Creato sensore dinamico per codice SIA: %s", code)
         except Exception as e:
@@ -264,31 +279,157 @@ class SIAKnownCodesSensor(SensorEntity):
 
 
 class SIAEventCodeSensor(SensorEntity):
-    """Sensor per un singolo codice SIA rilevato durante learning."""
+    """Sensor per codice o label SIA con debounce e diagnostica.
 
-    def __init__(self, sia_data, config_entry, code: str):
+    Costruttore accetta `code` (string) o `label` (friendly label estratto dal bracket).
+    Se `label` è fornito, il sensore userà il nome leggibile come friendly name e entity_id.
+    """
+
+    def __init__(self, sia_data, config_entry, code: str | None = None, label: str | None = None):
         self._sia_data = sia_data
         self._config_entry = config_entry
-        self._code = str(code)
+        self._code = str(code) if code is not None else None
+        self._label = label if label else None
+
+        # diagnostic counts
+        self._raw_count = 0
+        self._accepted_count = 0
+        self._last_raw_ts = None
+        self._last_accepted_ts = None
+
+        # determine debounce seconds from mapping or default
+        self._debounce = None
+        if self._label and getattr(sia_data, 'mapping', None):
+            meta = sia_data.mapping.get(self._label) or {}
+            try:
+                self._debounce = float(meta.get('debounce_seconds', sia_data.default_debounce_seconds))
+            except Exception:
+                self._debounce = float(sia_data.default_debounce_seconds)
+        else:
+            self._debounce = float(getattr(sia_data, 'default_debounce_seconds', 1.44))
+
+        # entity_id generation if label provided
+        self._entity_id = None
+        if self._label:
+            # sanitize label to entity id format: lowercase, replace non-alnum with _
+            ent = re.sub(r"[^0-9a-zA-Z]+", '_', self._label).strip('_').lower()
+            base = f"sensor.pysiaalarm_{ent}"
+            # We don't have access to hass.generate_entity_id here; use sanitized base
+            self._entity_id = base
+
+        # register listener so sensor receives events
+        try:
+            self._sia_data.add_listener(self._handle_event)
+        except Exception:
+            pass
+
+    @property
+    def available(self) -> bool:
+        return True
 
     @property
     def name(self) -> str:
-        return f"SIA Code {self._code} {self._config_entry.data['account_id']}"
+        if self._label:
+            return f"{self._label}"
+        if self._code:
+            return f"SIA Code {self._code} {self._config_entry.data['account_id']}"
+        return f"SIA Sensor {self._config_entry.data['account_id']}"
 
     @property
     def unique_id(self) -> str:
-        return f"sia_code_{self._config_entry.data['account_id']}_{self._code}"
+        if self._label:
+            safe = re.sub(r"[^0-9a-zA-Z]+", '_', self._label).strip('_').lower()
+            return f"sia_sensor_{self._config_entry.data['account_id']}_{safe}"
+        if self._code:
+            return f"sia_code_{self._config_entry.data['account_id']}_{self._code}"
+        return f"sia_sensor_{self._config_entry.data['account_id']}_unknown"
 
     @property
     def state(self) -> int:
-        entry = self._sia_data.codes.get(self._code)
-        return entry.get("count", 0) if entry else 0
+        # accepted count is the usable state
+        return self._accepted_count
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
-        entry = self._sia_data.codes.get(self._code, {})
-        return {
-            "zones": list(entry.get("zones", [])),
-            "last_seen": entry.get("last_seen"),
-            "samples": entry.get("samples", []),
+        attrs = {
+            'raw_count': self._raw_count,
+            'accepted_count': self._accepted_count,
+            'debounce_seconds': self._debounce,
+            'last_raw_ts': self._last_raw_ts.isoformat() if self._last_raw_ts else None,
+            'last_accepted_ts': self._last_accepted_ts.isoformat() if self._last_accepted_ts else None,
         }
+        if self._code:
+            entry = self._sia_data.codes.get(self._code, {})
+            attrs.update({
+                'zones': list(entry.get('zones', [])),
+                'last_seen': entry.get('last_seen'),
+                'samples': entry.get('samples', []),
+            })
+        return attrs
+
+    def _update_on_event(self, ev: SIAEvent, label: str | None = None) -> None:
+        """Called by SIAEvent listeners: update counts and apply debounce."""
+        from datetime import datetime
+        now = getattr(ev, 'timestamp', datetime.now())
+        self._raw_count += 1
+        self._last_raw_ts = now
+
+        last_acc = self._last_accepted_ts
+        allow = False
+        if last_acc is None:
+            allow = True
+        else:
+            diff = (now - last_acc).total_seconds()
+            if diff >= self._debounce:
+                allow = True
+
+        if allow:
+            self._accepted_count += 1
+            self._last_accepted_ts = now
+            # schedule HA update
+            self.schedule_update_ha_state()
+
+    def _extract_label_from_event(self, ev: SIAEvent) -> str | None:
+        """Try to extract bracket label or similar from event raw message."""
+        raw = getattr(ev, 'full_message', None) or getattr(ev, 'message', None) or getattr(ev, 'line', None)
+        if not raw:
+            return None
+        try:
+            m = re.search(r"\[(.*?)\]", raw)
+            if m:
+                lbl = m.group(1).strip()
+                return lbl
+        except Exception:
+            pass
+        return None
+
+    def _handle_event(self, ev: SIAEvent) -> None:
+        """Listener called by SIAAlarmData for every event; filter and update counts."""
+        try:
+            # if sensor is code-based, match code
+            if self._code:
+                if hasattr(ev, 'code') and ev.code == self._code:
+                    self._update_on_event(ev)
+                return
+
+            # if sensor is label-based, try to extract label from event and compare
+            if self._label:
+                lbl = self._extract_label_from_event(ev)
+                if not lbl:
+                    return
+                # compare normalized labels
+                def norm(s: str) -> str:
+                    return re.sub(r"\s+", ' ', s.strip()).lower()
+
+                if norm(lbl) == norm(self._label):
+                    self._update_on_event(ev, label=lbl)
+        except Exception:
+            _LOGGER.debug("Errore matching evento per sensore SIA %s", self._label or self._code)
+
+    async def async_will_remove_from_hass(self) -> None:
+        """Cleanup quando il sensore viene rimosso: deregistra listener."""
+        try:
+            self._sia_data.remove_listener(self._handle_event)
+        except Exception:
+            pass
+

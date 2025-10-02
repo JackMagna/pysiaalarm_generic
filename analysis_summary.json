@@ -1,0 +1,41 @@
+{
+  "total_events": 465,
+  "groups": [
+    {
+      "code": "999",
+      "ri": "1",
+      "count": 389,
+      "unique_bracket_samples": 6,
+      "median_delta": 0.9601035,
+      "mean_delta": 246.88162002061856,
+      "bursts": 99,
+      "events_in_bursts": 389,
+      "pct_in_bursts": 100.0,
+      "sample_bracket": "#005544|Nri1UX17^C. P.CUCINA     CASA            ^"
+    },
+    {
+      "code": "999",
+      "ri": "2",
+      "count": 72,
+      "unique_bracket_samples": 2,
+      "median_delta": 0.960012,
+      "mean_delta": 1037.9617324929577,
+      "bursts": 18,
+      "events_in_bursts": 72,
+      "pct_in_bursts": 100.0,
+      "sample_bracket": "#005544|Nri2UX37^C.P.SEMINTERRATOGARAGE          ^"
+    },
+    {
+      "code": "999",
+      "ri": "0",
+      "count": 4,
+      "unique_bracket_samples": 1,
+      "median_delta": 0.959305,
+      "mean_delta": 0.9584896666666667,
+      "bursts": 1,
+      "events_in_bursts": 4,
+      "pct_in_bursts": 100.0,
+      "sample_bracket": "#005544|Nri0RP1^SL 1610030200083432^"
+    }
+  ]
+}

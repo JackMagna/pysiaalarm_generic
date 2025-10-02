@@ -17,6 +17,12 @@ from typing import Coroutine
 from homeassistant.helpers import storage
 
 from .const import DOMAIN, CONF_ACCOUNT_ID, CONF_ENCRYPTION_KEY
+import os
+import json
+try:
+    import yaml
+except Exception:
+    yaml = None
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -33,6 +39,10 @@ class SIAAlarmData:
         self.events: list[SIAEvent] = []
         self.listeners: list[callable] = []
         self.codes: dict[str, dict] = {}
+        # mapping per-sensor loaded from config (label -> {debounce_seconds, friendly_name})
+        self.mapping: dict = {}
+        # default debounce in seconds (can be overridden by mapping file)
+        self.default_debounce_seconds: float = 1.44
         self.learning: bool = False
         self._hass = None
         self.entity_adder = None
@@ -136,6 +146,26 @@ class SIAAlarmData:
                 self.codes = {}
         except Exception as e:
             _LOGGER.error("Errore caricamento codici: %s", e)
+
+        # try to load optional mapping file from HA config dir
+        try:
+            conf_path = hass.config.path('pysiaalarm_mapping.yaml')
+            if os.path.exists(conf_path) and yaml is not None:
+                with open(conf_path, 'r', encoding='utf-8') as f:
+                    cfg = yaml.safe_load(f) or {}
+                    # expected format: { sensors: { '<label>': { debounce_seconds: 1.2, friendly_name: '...' } } }
+                    sensors = cfg.get('sensors') if isinstance(cfg, dict) else None
+                    if sensors and isinstance(sensors, dict):
+                        self.mapping = sensors
+                        _LOGGER.info("Mappatura sensori pySIAAlarm caricata da %s", conf_path)
+                        # if user provided a global default debounce
+                        if 'default_debounce_seconds' in cfg:
+                            try:
+                                self.default_debounce_seconds = float(cfg.get('default_debounce_seconds'))
+                            except Exception:
+                                pass
+        except Exception as e:
+            _LOGGER.debug("Nessuna mapping file o errore caricamento mapping: %s", e)
 
     def start_learning(self) -> None:
         self.learning = True
