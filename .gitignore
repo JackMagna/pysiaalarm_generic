@@ -53,3 +53,5 @@ MANIFEST
 .conda*/
 
 tests/*.json
+pysiaalarm_codes_*.csv
+pysiaalarm_codes_*.csv

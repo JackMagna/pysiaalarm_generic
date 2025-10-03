@@ -54,6 +54,23 @@ async def async_setup_entry(
         dynamic_entities = []
 
     if dynamic_entities:
+        # Log which dynamic sensors we're about to add (helps debugging mapping/labels)
+        try:
+            _LOGGER.info("Preparazione sensori dinamici: totale=%d", len(dynamic_entities))
+            for ent in dynamic_entities:
+                try:
+                    _LOGGER.info(
+                        "Sensore dinamico pronto: name=%s unique_id=%s label=%s code=%s debounce=%s",
+                        getattr(ent, 'name', None),
+                        getattr(ent, 'unique_id', None),
+                        getattr(ent, '_label', None),
+                        getattr(ent, '_code', None),
+                        getattr(ent, '_debounce', None),
+                    )
+                except Exception:
+                    _LOGGER.debug("Errore log sensore dinamico pre-creazione", exc_info=True)
+        except Exception:
+            _LOGGER.debug("Errore durante il logging dei sensori dinamici", exc_info=True)
         async_add_entities(dynamic_entities)
 
     # Provide a callback so sia_data can request creation of a sensor when a new code is added
@@ -76,7 +93,18 @@ async def async_setup_entry(
                 label = None
             ent = SIAEventCodeSensor(sia_data, config_entry, code=code, label=label)
             async_add_entities([ent])
-            _LOGGER.info("Creato sensore dinamico per codice SIA: %s", code)
+            # Log detailed info about created dynamic sensor
+            try:
+                _LOGGER.info(
+                    "Creato sensore dinamico: name=%s unique_id=%s label=%s code=%s debounce=%s",
+                    getattr(ent, 'name', None),
+                    getattr(ent, 'unique_id', None),
+                    getattr(ent, '_label', None),
+                    getattr(ent, '_code', None),
+                    getattr(ent, '_debounce', None),
+                )
+            except Exception:
+                _LOGGER.info("Creato sensore dinamico per codice SIA: %s", code)
         except Exception as e:
             _LOGGER.error("Errore creazione sensore dinamico per %s: %s", code, e)
 
@@ -370,7 +398,20 @@ class SIAEventCodeSensor(SensorEntity):
     def _update_on_event(self, ev: SIAEvent, label: str | None = None) -> None:
         """Called by SIAEvent listeners: update counts and apply debounce."""
         from datetime import datetime
-        now = getattr(ev, 'timestamp', datetime.now())
+        # normalize timestamp: accept datetime or ISO string, fallback to now
+        ts = getattr(ev, 'timestamp', None)
+        if isinstance(ts, datetime):
+            now = ts
+        else:
+            # try parse ISO string
+            now = None
+            try:
+                if isinstance(ts, str) and ts:
+                    now = datetime.fromisoformat(ts)
+            except Exception:
+                now = None
+            if now is None:
+                now = datetime.now()
         self._raw_count += 1
         self._last_raw_ts = now
 
@@ -386,8 +427,33 @@ class SIAEventCodeSensor(SensorEntity):
         if allow:
             self._accepted_count += 1
             self._last_accepted_ts = now
+            try:
+                now_iso = now.isoformat()
+            except Exception:
+                now_iso = str(now)
+            _LOGGER.info(
+                "SIA sensor match accepted: sensor=%s code=%s label=%s now=%s raw_count=%d accepted_count=%d",
+                (self._label or self._code), getattr(ev, 'code', None), label, now_iso, self._raw_count, self._accepted_count,
+            )
             # schedule HA update
-            self.schedule_update_ha_state()
+            try:
+                self.schedule_update_ha_state()
+            except Exception:
+                _LOGGER.debug("schedule_update_ha_state failed for %s", self._label or self._code)
+        else:
+            try:
+                now_iso = now.isoformat()
+            except Exception:
+                now_iso = str(now)
+            last_acc_iso = None
+            try:
+                last_acc_iso = self._last_accepted_ts.isoformat() if self._last_accepted_ts else None
+            except Exception:
+                last_acc_iso = str(self._last_accepted_ts)
+            _LOGGER.debug(
+                "SIA sensor match suppressed by debounce: sensor=%s code=%s label=%s now=%s last_accepted=%s debounce=%.2f",
+                (self._label or self._code), getattr(ev, 'code', None), label, now_iso, last_acc_iso, self._debounce,
+            )
 
     def _extract_label_from_event(self, ev: SIAEvent) -> str | None:
         """Try to extract bracket label or similar from event raw message."""
@@ -396,12 +462,42 @@ class SIAEventCodeSensor(SensorEntity):
             return None
         try:
             m = re.search(r"\[(.*?)\]", raw)
-            if m:
-                lbl = m.group(1).strip()
-                return lbl
+            if not m:
+                return None
+            bracket = m.group(1).strip()
+
+            # Often bracket content is like: "#005544|Nri1UX17^C. P.CUCINA     CASA            ^"
+            # We want the human label portion, typically between '^' separators
+            if '^' in bracket:
+                parts = bracket.split('^')
+                # prefer the middle part if present
+                if len(parts) >= 2 and parts[1].strip():
+                    candidate = parts[1].strip()
+                else:
+                    # fallback: try last non-empty
+                    cand = [p for p in parts if p.strip()]
+                    candidate = cand[-1].strip() if cand else bracket
+            else:
+                # if there's a pipe '|' remove prefix like '#005544|...'
+                if '|' in bracket:
+                    candidate = bracket.split('|', 1)[-1].strip()
+                else:
+                    candidate = bracket
+
+            # Sometimes candidate includes receiver/status prefixes like 'C. ' or 'U. '
+            # If there's a 'P.' marker inside (e.g. 'C. P.CUCINA'), prefer substring from 'P.'
+            pidx = candidate.find('P.')
+            if pidx != -1:
+                candidate = candidate[pidx:]
+            else:
+                # remove leading single-letter markers like 'C. ' or 'U. '
+                candidate = re.sub(r'^[A-Z]\.\s*', '', candidate)
+
+            # Normalize whitespace
+            candidate = re.sub(r"\s+", ' ', candidate).strip()
+            return candidate
         except Exception:
-            pass
-        return None
+            return None
 
     def _handle_event(self, ev: SIAEvent) -> None:
         """Listener called by SIAAlarmData for every event; filter and update counts."""
@@ -409,6 +505,7 @@ class SIAEventCodeSensor(SensorEntity):
             # if sensor is code-based, match code
             if self._code:
                 if hasattr(ev, 'code') and ev.code == self._code:
+                    _LOGGER.debug("SIA code sensor matched: sensor=%s code=%s", self._code, ev.code)
                     self._update_on_event(ev)
                 return
 
@@ -416,13 +513,17 @@ class SIAEventCodeSensor(SensorEntity):
             if self._label:
                 lbl = self._extract_label_from_event(ev)
                 if not lbl:
+                    _LOGGER.debug("SIA label sensor: no label extracted from event for sensor=%s", self._label)
                     return
                 # compare normalized labels
                 def norm(s: str) -> str:
                     return re.sub(r"\s+", ' ', s.strip()).lower()
 
                 if norm(lbl) == norm(self._label):
+                    _LOGGER.debug("SIA label sensor matched: sensor_label=%s event_label=%s", self._label, lbl)
                     self._update_on_event(ev, label=lbl)
+                else:
+                    _LOGGER.debug("SIA label mismatch: sensor_label=%s event_label=%s", self._label, lbl)
         except Exception:
             _LOGGER.debug("Errore matching evento per sensore SIA %s", self._label or self._code)
 
