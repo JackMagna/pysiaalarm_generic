@@ -1,0 +1,32 @@
+# Automazioni per sincronizzare gli input_boolean con il baseline iniziale nell'integrazione pySIAAlarm
+# Copia i blocchi in Configuration -> Automations oppure in automations.yaml
+
+- alias: Set initial state Cucina pysiaalarm
+  trigger:
+    - platform: state
+      entity_id: input_boolean.pysiaalarm_cucina_initial
+  action:
+    - service: pysiaalarm.set_sensor_state
+      data:
+        label: "P.CUCINA     CASA"
+        state: "{{ 'open' if is_state('input_boolean.pysiaalarm_cucina_initial', 'on') else 'closed' }}"
+
+- alias: Set initial state Ingresso pysiaalarm
+  trigger:
+    - platform: state
+      entity_id: input_boolean.pysiaalarm_ingresso_initial
+  action:
+    - service: pysiaalarm.set_sensor_state
+      data:
+        label: "P.INGRESSO CASA"
+        state: "{{ 'open' if is_state('input_boolean.pysiaalarm_ingresso_initial', 'on') else 'closed' }}"
+
+- alias: Set initial state Seminterrato Garage pysiaalarm
+  trigger:
+    - platform: state
+      entity_id: input_boolean.pysiaalarm_seminterrato_garage_initial
+  action:
+    - service: pysiaalarm.set_sensor_state
+      data:
+        label: "P.SEMINTERRATOGARAGE"
+        state: "{{ 'open' if is_state('input_boolean.pysiaalarm_seminterrato_garage_initial', 'on') else 'closed' }}"

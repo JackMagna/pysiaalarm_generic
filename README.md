@@ -244,3 +244,20 @@ grep -i "pysiaalarm" home-assistant_*.log | tail -n 200
 - Se vuoi che crei automaticamente mapping precisi tra codici e sensori (con nomi friendly), invia una lista iniziale di codici e la loro descrizione.
 - Se preferisci posso aggiungere la persistenza della configurazione dell'export automatico per riattivare il job dopo il riavvio di HA.
 
+## Helpers per sensori di contatto (input_boolean + automazioni)
+
+Se usi sensori di tipo `contact` nel mapping (`type: contact`), ho preparato degli snippet YAML pronti per creare gli helper (`input_boolean`) e le automazioni che sincronizzano questi helper con lo stato iniziale dell'integrazione.
+
+I file generati sono disponibili in `helpers/` nel repository:
+
+- `helpers/pysiaalarm_input_booleans.yaml` — blocco `input_boolean` da incollare in Configuration → Helpers o nel tuo `configuration.yaml` sotto `input_boolean:`.
+- `helpers/pysiaalarm_automations.yaml` — automazioni da incollare in Configuration → Automations o in `automations.yaml`.
+
+Workflow consigliato:
+1. Aggiorna il tuo `pysiaalarm_mapping.yaml` aggiungendo `type: contact` ai sensori che rappresentano contatti (finestre, porte).
+2. Copia/incolla i blocchi da `helpers/pysiaalarm_input_booleans.yaml` per creare gli helper.
+3. Copia/incolla i blocchi da `helpers/pysiaalarm_automations.yaml` per creare le automazioni che impostano la baseline iniziale nell'integrazione.
+4. Usa la UI per impostare i toggle degli helper alla condizione reale (aperto/chiuso) e attendi che le automazioni chiamino `pysiaalarm.set_sensor_state` per salvare la baseline.
+
+Se vuoi, posso generare automaticamente i blocchi per tutte le etichette presenti nel tuo `pysiaalarm_mapping.yaml` corrente: fammi sapere e aggiorno i file con le etichette effettive trovate.
+

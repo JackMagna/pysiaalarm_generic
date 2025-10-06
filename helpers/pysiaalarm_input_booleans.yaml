@@ -1,0 +1,14 @@
+# Input boolean helpers per pySIAAlarm (sensori contact)
+# Copia questo blocco in Configuration -> Helpers oppure nel tuo configuration.yaml sotto input_boolean:
+
+pysiaalarm_cucina_initial:
+  name: "Cucina (initial)"
+  initial: off
+
+pysiaalarm_ingresso_initial:
+  name: "Ingresso (initial)"
+  initial: off
+
+pysiaalarm_seminterrato_garage_initial:
+  name: "Seminterrato Garage (initial)"
+  initial: off
