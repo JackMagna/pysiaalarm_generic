@@ -761,20 +761,22 @@ class SIAEventBinarySensor(BinarySensorEntity):
     def is_on(self) -> bool:
         # Contact: True = open, False = closed
         try:
+            # Determine baseline: if user provided initial_state, use it; otherwise default to CLOSED
+            baseline_open = None
             if self._initial_state is not None:
                 s = str(self._initial_state).lower()
-                baseline_open = None
                 if s in ('open', 'on', '1', 'true', 'yes'):
                     baseline_open = True
                 if s in ('closed', 'off', '0', 'false', 'no'):
                     baseline_open = False
-                # If we have a baseline, compute parity of accepted_count: each accepted event toggles
-                if baseline_open is not None:
-                    parity = self._accepted_count % 2
-                    # parity 0 => baseline, parity 1 => inverted
-                    return baseline_open if parity == 0 else (not baseline_open)
-            # fallback to accepted_count when no baseline known
-            return self._accepted_count > 0
+            # default baseline when missing: closed (False) so parity toggling works
+            if baseline_open is None:
+                baseline_open = False
+
+            # compute parity of accepted_count: each accepted event toggles
+            parity = self._accepted_count % 2
+            # parity 0 => baseline, parity 1 => inverted
+            return baseline_open if parity == 0 else (not baseline_open)
         except Exception:
             return self._accepted_count > 0
 
