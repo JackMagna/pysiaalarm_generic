@@ -6,6 +6,7 @@ from typing import Any
 from datetime import datetime
 
 from homeassistant.components.sensor import SensorEntity
+from homeassistant.components.binary_sensor import BinarySensorEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
@@ -38,16 +39,19 @@ async def async_setup_entry(
     created_codes = set()
     try:
         # Create dynamic sensors based on mapping if available, else fallback to codes
-        try:
-            if getattr(sia_data, 'mapping', None):
-                for label, meta in sia_data.mapping.items():
+        if getattr(sia_data, 'mapping', None):
+            for label, meta in sia_data.mapping.items():
+                try:
+                    if isinstance(meta, dict) and meta.get('type') == 'contact':
+                        dynamic_entities.append(SIAEventBinarySensor(sia_data, config_entry, code=None, label=label, meta=meta))
+                    else:
+                        dynamic_entities.append(SIAEventCodeSensor(sia_data, config_entry, code=None, label=label))
+                except Exception:
                     dynamic_entities.append(SIAEventCodeSensor(sia_data, config_entry, code=None, label=label))
-            else:
-                for code, info in sia_data.codes.items():
-                    dynamic_entities.append(SIAEventCodeSensor(sia_data, config_entry, code=code))
-        except Exception:
-            dynamic_entities = []
-            created_codes.add(code)
+        else:
+            for code, info in sia_data.codes.items():
+                dynamic_entities.append(SIAEventCodeSensor(sia_data, config_entry, code=code))
+
         # Sensor that lists all known codes
         dynamic_entities.append(SIAKnownCodesSensor(sia_data, config_entry))
     except Exception:
@@ -109,6 +113,75 @@ async def async_setup_entry(
             _LOGGER.error("Errore creazione sensore dinamico per %s: %s", code, e)
 
     sia_data.entity_adder = _entity_adder
+
+    # register services to set/reset manual state per sensor (by label or code)
+    async def _set_sensor_state(call):
+        """Service to set manual state for a sensor.
+
+        Service data:
+        - target: { 'label': '<label>' } or { 'code': '<code>' }
+        - state: 'open'|'closed'|'on'|'off' or numeric
+        """
+        data = call.data or {}
+        state = data.get('state')
+        label = data.get('label')
+        code = data.get('code')
+        if not state or (not label and not code):
+            _LOGGER.error("set_sensor_state missing state or target")
+            return
+        # normalize key
+        key = None
+        if label:
+            key = str(label)
+            sia_data.initial_states[key] = str(state)
+            # notify entity if present
+            ent = sia_data.entities_by_label.get(key)
+            if ent:
+                ent._apply_manual_state(str(state))
+        elif code:
+            key = str(code)
+            sia_data.initial_states[key] = str(state)
+            ent = sia_data.entities_by_code.get(key)
+            if ent:
+                ent._apply_manual_state(str(state))
+        try:
+            # schedule save
+            if hasattr(sia_data, '_hass') and sia_data._hass:
+                sia_data._hass.async_create_task(sia_data.async_save_initial_states())
+        except Exception:
+            pass
+
+    async def _reset_sensor_state(call):
+        """Service to reset manual state for a sensor (remove override)."""
+        data = call.data or {}
+        label = data.get('label')
+        code = data.get('code')
+        key = None
+        if label:
+            key = str(label)
+            if key in sia_data.initial_states:
+                sia_data.initial_states.pop(key, None)
+            ent = sia_data.entities_by_label.get(key)
+            if ent:
+                ent._clear_manual_state()
+        elif code:
+            key = str(code)
+            if key in sia_data.initial_states:
+                sia_data.initial_states.pop(key, None)
+            ent = sia_data.entities_by_code.get(key)
+            if ent:
+                ent._clear_manual_state()
+        try:
+            if hasattr(sia_data, '_hass') and sia_data._hass:
+                sia_data._hass.async_create_task(sia_data.async_save_initial_states())
+        except Exception:
+            pass
+
+    try:
+        hass.services.async_register(DOMAIN, 'set_sensor_state', _set_sensor_state)
+        hass.services.async_register(DOMAIN, 'reset_sensor_state', _reset_sensor_state)
+    except Exception:
+        _LOGGER.debug('Impossibile registrare servizi set/reset sensor state', exc_info=True)
 
 
 class SIAEventMonitorSensor(SensorEntity):
@@ -333,8 +406,11 @@ class SIAEventCodeSensor(SensorEntity):
                 self._debounce = float(meta.get('debounce_seconds', sia_data.default_debounce_seconds))
             except Exception:
                 self._debounce = float(sia_data.default_debounce_seconds)
+            # detect device type (e.g., contact) from mapping metadata
+            self._device_type = meta.get('type') if isinstance(meta, dict) else None
         else:
             self._debounce = float(getattr(sia_data, 'default_debounce_seconds', 1.44))
+            self._device_type = None
 
         # entity_id generation if label provided
         self._entity_id = None
@@ -350,6 +426,31 @@ class SIAEventCodeSensor(SensorEntity):
             self._sia_data.add_listener(self._handle_event)
         except Exception:
             pass
+
+        # Register entity in sia_data for manual state overrides
+        try:
+            if self._label:
+                try:
+                    sia_data.entities_by_label[self._label] = self
+                except Exception:
+                    pass
+            if self._code:
+                try:
+                    sia_data.entities_by_code[self._code] = self
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+        # Initialize manual override state from persisted states if present
+        try:
+            self._manual_state = None
+            if self._label and getattr(sia_data, 'initial_states', None):
+                self._manual_state = sia_data.initial_states.get(self._label)
+            if self._manual_state is None and self._code and getattr(sia_data, 'initial_states', None):
+                self._manual_state = sia_data.initial_states.get(self._code)
+        except Exception:
+            self._manual_state = None
 
     @property
     def available(self) -> bool:
@@ -374,7 +475,26 @@ class SIAEventCodeSensor(SensorEntity):
 
     @property
     def state(self) -> int:
-        # accepted count is the usable state
+        # If manual override exists, return it (string). For contact devices, return 'open'/'closed'.
+        try:
+            # check initial user-provided baseline by code or label
+            if self._label and getattr(self._sia_data, 'initial_states', None):
+                st = self._sia_data.initial_states.get(self._label)
+                if st is not None:
+                    return st
+            if self._code and getattr(self._sia_data, 'initial_states', None):
+                st = self._sia_data.initial_states.get(self._code)
+                if st is not None:
+                    return st
+        except Exception:
+            pass
+        # otherwise return accepted_count for numeric sensors
+        if self._device_type == 'contact':
+            # convert accepted_count (int) to human state 'closed' if 0 else 'open'
+            try:
+                return 'open' if self._accepted_count > 0 else 'closed'
+            except Exception:
+                return 'closed'
         return self._accepted_count
 
     @property
@@ -386,6 +506,12 @@ class SIAEventCodeSensor(SensorEntity):
             'last_raw_ts': self._last_raw_ts.isoformat() if self._last_raw_ts else None,
             'last_accepted_ts': self._last_accepted_ts.isoformat() if self._last_accepted_ts else None,
         }
+        # expose manual override if present
+        try:
+            if hasattr(self, '_manual_state') and self._manual_state is not None:
+                attrs['manual_state'] = self._manual_state
+        except Exception:
+            pass
         if self._code:
             entry = self._sia_data.codes.get(self._code, {})
             attrs.update({
@@ -437,6 +563,7 @@ class SIAEventCodeSensor(SensorEntity):
             )
             # schedule HA update
             try:
+                # if device is contact, clear any automatic manual state? No: keep manual overrides
                 self.schedule_update_ha_state()
             except Exception:
                 _LOGGER.debug("schedule_update_ha_state failed for %s", self._label or self._code)
@@ -515,6 +642,11 @@ class SIAEventCodeSensor(SensorEntity):
                 if not lbl:
                     _LOGGER.debug("SIA label sensor: no label extracted from event for sensor=%s", self._label)
                     return
+                # Log the extracted label explicitly to help debugging mapping mismatches
+                try:
+                    _LOGGER.info("SIA extracted label for sensor=%s event_label=%s", self._label, lbl)
+                except Exception:
+                    _LOGGER.debug("SIA extracted label (logging failed) for sensor=%s", self._label, exc_info=True)
                 # compare normalized labels
                 def norm(s: str) -> str:
                     return re.sub(r"\s+", ' ', s.strip()).lower()
@@ -529,6 +661,230 @@ class SIAEventCodeSensor(SensorEntity):
 
     async def async_will_remove_from_hass(self) -> None:
         """Cleanup quando il sensore viene rimosso: deregistra listener."""
+        try:
+            self._sia_data.remove_listener(self._handle_event)
+        except Exception:
+            pass
+
+    # Methods for manual state override via services
+    def _apply_manual_state(self, state: str) -> None:
+        """Apply manual state override; state is stored as string."""
+        try:
+            s = str(state)
+            self._manual_state = s
+        except Exception:
+            self._manual_state = str(state)
+        try:
+            self.schedule_update_ha_state()
+        except Exception:
+            pass
+
+    def _clear_manual_state(self) -> None:
+        try:
+            if hasattr(self, '_manual_state'):
+                delattr(self, '_manual_state')
+            self._manual_state = None
+        except Exception:
+            pass
+        try:
+            self.schedule_update_ha_state()
+        except Exception:
+            pass
+
+
+class SIAEventBinarySensor(BinarySensorEntity):
+    """Binary sensor for SIA contact-type events."""
+
+    def __init__(self, sia_data, config_entry, code: str | None = None, label: str | None = None, meta: dict | None = None):
+        self._sia_data = sia_data
+        self._config_entry = config_entry
+        self._code = str(code) if code is not None else None
+        self._label = label if label else None
+
+        # diagnostic counts
+        self._raw_count = 0
+        self._accepted_count = 0
+        self._last_raw_ts = None
+        self._last_accepted_ts = None
+
+        # debounce
+        self._debounce = float(getattr(sia_data, 'default_debounce_seconds', 1.44))
+        if meta and isinstance(meta, dict):
+            try:
+                self._debounce = float(meta.get('debounce_seconds', self._debounce))
+            except Exception:
+                pass
+
+        # register listener
+        try:
+            self._sia_data.add_listener(self._handle_event)
+        except Exception:
+            pass
+
+        # register in registry
+        try:
+            if self._label:
+                sia_data.entities_by_label[self._label] = self
+            if self._code:
+                sia_data.entities_by_code[self._code] = self
+        except Exception:
+            pass
+
+        # initial state baseline
+        try:
+            self._initial_state = None
+            if self._label and getattr(sia_data, 'initial_states', None):
+                self._initial_state = sia_data.initial_states.get(self._label)
+            if self._initial_state is None and self._code and getattr(sia_data, 'initial_states', None):
+                self._initial_state = sia_data.initial_states.get(self._code)
+        except Exception:
+            self._initial_state = None
+
+    @property
+    def name(self) -> str:
+        if self._label:
+            return f"{self._label}"
+        if self._code:
+            return f"SIA Contact {self._code} {self._config_entry.data['account_id']}"
+        return f"SIA Contact {self._config_entry.data['account_id']}"
+
+    @property
+    def unique_id(self) -> str:
+        if self._label:
+            safe = re.sub(r"[^0-9a-zA-Z]+", '_', self._label).strip('_').lower()
+            return f"sia_contact_{self._config_entry.data['account_id']}_{safe}"
+        if self._code:
+            return f"sia_contact_{self._config_entry.data['account_id']}_{self._code}"
+        return f"sia_contact_{self._config_entry.data['account_id']}_unknown"
+
+    @property
+    def is_on(self) -> bool:
+        # Contact: True = open, False = closed
+        try:
+            if self._initial_state is not None:
+                s = str(self._initial_state).lower()
+                baseline_open = None
+                if s in ('open', 'on', '1', 'true', 'yes'):
+                    baseline_open = True
+                if s in ('closed', 'off', '0', 'false', 'no'):
+                    baseline_open = False
+                # If we have a baseline, compute parity of accepted_count: each accepted event toggles
+                if baseline_open is not None:
+                    parity = self._accepted_count % 2
+                    # parity 0 => baseline, parity 1 => inverted
+                    return baseline_open if parity == 0 else (not baseline_open)
+            # fallback to accepted_count when no baseline known
+            return self._accepted_count > 0
+        except Exception:
+            return self._accepted_count > 0
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        # compute current derived state for clarity
+        try:
+            computed = None
+            try:
+                computed = 'open' if self.is_on() else 'closed'
+            except Exception:
+                computed = None
+        except Exception:
+            computed = None
+        return {
+            'raw_count': self._raw_count,
+            'accepted_count': self._accepted_count,
+            'debounce_seconds': self._debounce,
+            'initial_state': self._initial_state,
+            'computed_state': computed,
+            'last_raw_ts': self._last_raw_ts.isoformat() if self._last_raw_ts else None,
+            'last_accepted_ts': self._last_accepted_ts.isoformat() if self._last_accepted_ts else None,
+        }
+
+    def _update_on_event(self, ev: SIAEvent) -> None:
+        from datetime import datetime
+        ts = getattr(ev, 'timestamp', None)
+        if isinstance(ts, datetime):
+            now = ts
+        else:
+            now = None
+            try:
+                if isinstance(ts, str) and ts:
+                    now = datetime.fromisoformat(ts)
+            except Exception:
+                now = None
+            if now is None:
+                now = datetime.now()
+        self._raw_count += 1
+        self._last_raw_ts = now
+
+        last_acc = self._last_accepted_ts
+        allow = False
+        if last_acc is None:
+            allow = True
+        else:
+            diff = (now - last_acc).total_seconds()
+            if diff >= self._debounce:
+                allow = True
+
+        if allow:
+            self._accepted_count += 1
+            self._last_accepted_ts = now
+            try:
+                self.schedule_update_ha_state()
+            except Exception:
+                pass
+
+    def _extract_label_from_event(self, ev: SIAEvent) -> str | None:
+        # reuse parent extraction logic
+        raw = getattr(ev, 'full_message', None) or getattr(ev, 'message', None) or getattr(ev, 'line', None)
+        if not raw:
+            return None
+        try:
+            m = re.search(r"\[(.*?)\]", raw)
+            if not m:
+                return None
+            bracket = m.group(1).strip()
+            if '^' in bracket:
+                parts = bracket.split('^')
+                if len(parts) >= 2 and parts[1].strip():
+                    candidate = parts[1].strip()
+                else:
+                    cand = [p for p in parts if p.strip()]
+                    candidate = cand[-1].strip() if cand else bracket
+            else:
+                if '|' in bracket:
+                    candidate = bracket.split('|', 1)[-1].strip()
+                else:
+                    candidate = bracket
+            pidx = candidate.find('P.')
+            if pidx != -1:
+                candidate = candidate[pidx:]
+            else:
+                candidate = re.sub(r'^[A-Z]\.]\s*', '', candidate)
+            candidate = re.sub(r"\s+", ' ', candidate).strip()
+            return candidate
+        except Exception:
+            return None
+
+    def _handle_event(self, ev: SIAEvent) -> None:
+        try:
+            if self._code:
+                if hasattr(ev, 'code') and ev.code == self._code:
+                    _LOGGER.debug("SIA contact code matched: %s", self._code)
+                    self._update_on_event(ev)
+                return
+            if self._label:
+                lbl = self._extract_label_from_event(ev)
+                if not lbl:
+                    return
+                def norm(s: str) -> str:
+                    return re.sub(r"\s+", ' ', s.strip()).lower()
+                if norm(lbl) == norm(self._label):
+                    _LOGGER.debug("SIA contact label matched: %s", self._label)
+                    self._update_on_event(ev)
+        except Exception:
+            _LOGGER.debug("Errore matching evento per contact %s", self._label or self._code)
+
+    async def async_will_remove_from_hass(self) -> None:
         try:
             self._sia_data.remove_listener(self._handle_event)
         except Exception:

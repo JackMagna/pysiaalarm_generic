@@ -39,6 +39,12 @@ class SIAAlarmData:
         self.events: list[SIAEvent] = []
         self.listeners: list[callable] = []
         self.codes: dict[str, dict] = {}
+        # persistent initial states for sensors (by code or normalized label)
+        # these represent the user-provided initial state baseline (e.g. 'open'/'closed')
+        self.initial_states: dict[str, str] = {}
+        # runtime entity registry to notify entities when manual state changes
+        self.entities_by_label: dict[str, object] = {}
+        self.entities_by_code: dict[str, object] = {}
         # mapping per-sensor loaded from config (label -> {debounce_seconds, friendly_name})
         self.mapping: dict = {}
         # default debounce in seconds (can be overridden by mapping file)
@@ -146,6 +152,18 @@ class SIAAlarmData:
                 self.codes = {}
         except Exception as e:
             _LOGGER.error("Errore caricamento codici: %s", e)
+
+        # Load persisted initial states (separate storage key)
+        try:
+            store_states = storage.Store(hass, STORE_VERSION, STORAGE_KEY + "_initial_states")
+            data_states = await store_states.async_load()
+            if data_states and isinstance(data_states, dict):
+                self.initial_states = data_states
+                _LOGGER.info("Caricate %d initial states SIA dallo storage", len(self.initial_states))
+            else:
+                self.initial_states = {}
+        except Exception as e:
+            _LOGGER.debug("Errore caricamento initial states: %s", e)
 
         # try to load optional mapping file from HA config dir
         try:
@@ -281,6 +299,17 @@ class SIAAlarmData:
         # register
         self._auto_export_unsub = async_track_time_interval(hass, _periodic, self._auto_export_interval)
         _LOGGER.info("Avviato export automatico SIA ogni %s secondi", int(self._auto_export_interval.total_seconds()))
+
+    async def async_save_initial_states(self) -> None:
+        """Salva gli stati iniziali nello storage di Home Assistant."""
+        if not self._hass:
+            return
+        try:
+            store = storage.Store(self._hass, STORE_VERSION, STORAGE_KEY + "_initial_states")
+            await store.async_save(self.initial_states or {})
+            _LOGGER.debug("Initial states SIA salvati: %s", list((self.initial_states or {}).keys()))
+        except Exception as e:
+            _LOGGER.error("Errore salvataggio initial states: %s", e)
 
     def stop_auto_export(self) -> None:
         """Stop periodic export if running."""
