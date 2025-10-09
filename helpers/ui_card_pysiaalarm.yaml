@@ -1,0 +1,320 @@
+type: vertical-stack
+cards:
+  - type: markdown
+    content: >-
+      ## Finestre e Porte
+      Usa i pulsanti per impostare lo stato iniziale (baseline) o resettarlo.
+
+  - type: grid
+    title: Finestre
+    columns: 2
+    square: false
+    cards:
+      - type: vertical-stack
+        cards:
+          - type: 'custom:mushroom-entity-card'
+            entity: sensor.f_matrimonialecasa
+            name: Finestra Camera Matrimoniale
+            icon: mdi:window-closed
+          - type: horizontal-stack
+            cards:
+              - type: 'custom:mushroom-button-card'
+                icon: mdi:window-open
+                name: Apri
+                color: red
+                tap_action:
+                  action: call-service
+                  service: pysiaalarm.set_sensor_state
+                  service_data:
+                    label: "F.MATRIMONIALECASA"
+                    state: "open"
+              - type: 'custom:mushroom-button-card'
+                icon: mdi:window-closed
+                name: Chiudi
+                color: green
+                tap_action:
+                  action: call-service
+                  service: pysiaalarm.set_sensor_state
+                  service_data:
+                    label: "F.MATRIMONIALECASA"
+                    state: "closed"
+              - type: 'custom:mushroom-button-card'
+                icon: mdi:backup-restore
+                name: Reset
+                color: gray
+                tap_action:
+                  action: call-service
+                  service: pysiaalarm.reset_sensor_state
+                  service_data:
+                    label: "F.MATRIMONIALECASA"
+
+      - type: vertical-stack
+        cards:
+          - type: 'custom:mushroom-entity-card'
+            entity: sensor.f_bagno_matr_casa
+            name: Bagno Camera Matrimoniale
+            icon: mdi:window-closed
+          - type: horizontal-stack
+            cards:
+              - type: 'custom:mushroom-button-card'
+                icon: mdi:window-open
+                name: Apri
+                color: red
+                tap_action:
+                  action: call-service
+                  service: pysiaalarm.set_sensor_state
+                  service_data:
+                    label: "F.BAGNO MATR.CASA"
+                    state: "open"
+              - type: 'custom:mushroom-button-card'
+                icon: mdi:window-closed
+                name: Chiudi
+                color: green
+                tap_action:
+                  action: call-service
+                  service: pysiaalarm.set_sensor_state
+                  service_data:
+                    label: "F.BAGNO MATR.CASA"
+                    state: "closed"
+              - type: 'custom:mushroom-button-card'
+                icon: mdi:backup-restore
+                name: Reset
+                color: gray
+                tap_action:
+                  action: call-service
+                  service: pysiaalarm.reset_sensor_state
+                  service_data:
+                    label: "F.BAGNO MATR.CASA"
+
+  - type: grid
+    title: Porte / Portoni
+    columns: 2
+    square: false
+    cards:
+      - type: vertical-stack
+        cards:
+          - type: 'custom:mushroom-entity-card'
+            entity: sensor.p_cucina_casa_2
+            name: Cucina
+            icon: mdi:door
+          - type: horizontal-stack
+            cards:
+              - type: 'custom:mushroom-button-card'
+                icon: mdi:door-open
+                name: Apri
+                color: red
+                tap_action:
+                  action: call-service
+                  service: pysiaalarm.set_sensor_state
+                  service_data:
+                    label: "P.CUCINA     CASA"
+                    state: "open"
+              - type: 'custom:mushroom-button-card'
+                icon: mdi:door-closed
+                name: Chiudi
+                color: green
+                tap_action:
+                  action: call-service
+                  service: pysiaalarm.set_sensor_state
+                  service_data:
+                    label: "P.CUCINA     CASA"
+                    state: "closed"
+              - type: 'custom:mushroom-button-card'
+                icon: mdi:backup-restore
+                name: Reset
+                color: gray
+                tap_action:
+                  action: call-service
+                  service: pysiaalarm.reset_sensor_state
+                  service_data:
+                    label: "P.CUCINA     CASA"
+
+      - type: vertical-stack
+        cards:
+          - type: 'custom:mushroom-entity-card'
+            entity: sensor.p_ingresso_casa_2
+            name: Ingresso
+            icon: mdi:door
+          - type: horizontal-stack
+            cards:
+              - type: 'custom:mushroom-button-card'
+                icon: mdi:door-open
+                name: Apri
+                color: red
+                tap_action:
+                  action: call-service
+                  service: pysiaalarm.set_sensor_state
+                  service_data:
+                    label: "P.INGRESSO   CASA"
+                    state: "open"
+              - type: 'custom:mushroom-button-card'
+                icon: mdi:door-closed
+                name: Chiudi
+                color: green
+                tap_action:
+                  action: call-service
+                  service: pysiaalarm.set_sensor_state
+                  service_data:
+                    label: "P.INGRESSO   CASA"
+                    state: "closed"
+              - type: 'custom:mushroom-button-card'
+                icon: mdi:backup-restore
+                name: Reset
+                color: gray
+                tap_action:
+                  action: call-service
+                  service: pysiaalarm.reset_sensor_state
+                  service_data:
+                    label: "P.INGRESSO   CASA"
+
+      - type: vertical-stack
+        cards:
+          - type: 'custom:mushroom-entity-card'
+            entity: sensor.p_terrazza_casa
+            name: Terrazza
+            icon: mdi:door
+          - type: horizontal-stack
+            cards:
+              - type: 'custom:mushroom-button-card'
+                icon: mdi:door-open
+                name: Apri
+                color: red
+                tap_action:
+                  action: call-service
+                  service: pysiaalarm.set_sensor_state
+                  service_data:
+                    label: "P.TERRAZZA   CASA"
+                    state: "open"
+              - type: 'custom:mushroom-button-card'
+                icon: mdi:door-closed
+                name: Chiudi
+                color: green
+                tap_action:
+                  action: call-service
+                  service: pysiaalarm.set_sensor_state
+                  service_data:
+                    label: "P.TERRAZZA   CASA"
+                    state: "closed"
+              - type: 'custom:mushroom-button-card'
+                icon: mdi:backup-restore
+                name: Reset
+                color: gray
+                tap_action:
+                  action: call-service
+                  service: pysiaalarm.reset_sensor_state
+                  service_data:
+                    label: "P.TERRAZZA   CASA"
+
+      - type: vertical-stack
+        cards:
+          - type: 'custom:mushroom-entity-card'
+            entity: sensor.basculante_garage
+            name: Basculante Garage
+            icon: mdi:garage
+          - type: horizontal-stack
+            cards:
+              - type: 'custom:mushroom-button-card'
+                icon: mdi:garage-open
+                name: Apri
+                color: red
+                tap_action:
+                  action: call-service
+                  service: pysiaalarm.set_sensor_state
+                  service_data:
+                    label: "BASCULANTE GARAGE"
+                    state: "open"
+              - type: 'custom:mushroom-button-card'
+                icon: mdi:garage
+                name: Chiudi
+                color: green
+                tap_action:
+                  action: call-service
+                  service: pysiaalarm.set_sensor_state
+                  service_data:
+                    label: "BASCULANTE GARAGE"
+                    state: "closed"
+              - type: 'custom:mushroom-button-card'
+                icon: mdi:backup-restore
+                name: Reset
+                color: gray
+                tap_action:
+                  action: call-service
+                  service: pysiaalarm.reset_sensor_state
+                  service_data:
+                    label: "BASCULANTE GARAGE"
+
+      - type: vertical-stack
+        cards:
+          - type: 'custom:mushroom-entity-card'
+            entity: sensor.p_seminterratogarage_2
+            name: Porta Seminterrato
+            icon: mdi:garage-variant
+          - type: horizontal-stack
+            cards:
+              - type: 'custom:mushroom-button-card'
+                icon: mdi:door-open
+                name: Apri
+                color: red
+                tap_action:
+                  action: call-service
+                  service: pysiaalarm.set_sensor_state
+                  service_data:
+                    label: "P.SEMINTERRATOGARAGE"
+                    state: "open"
+              - type: 'custom:mushroom-button-card'
+                icon: mdi:door-closed
+                name: Chiudi
+                color: green
+                tap_action:
+                  action: call-service
+                  service: pysiaalarm.set_sensor_state
+                  service_data:
+                    label: "P.SEMINTERRATOGARAGE"
+                    state: "closed"
+              - type: 'custom:mushroom-button-card'
+                icon: mdi:backup-restore
+                name: Reset
+                color: gray
+                tap_action:
+                  action: call-service
+                  service: pysiaalarm.reset_sensor_state
+                  service_data:
+                    label: "P.SEMINTERRATOGARAGE"
+
+      - type: vertical-stack
+        cards:
+          - type: 'custom:mushroom-entity-card'
+            entity: sensor.p_sala_casa
+            name: Finestrone Salotto
+            icon: mdi:door
+          - type: horizontal-stack
+            cards:
+              - type: 'custom:mushroom-button-card'
+                icon: mdi:door-open
+                name: Apri
+                color: red
+                tap_action:
+                  action: call-service
+                  service: pysiaalarm.set_sensor_state
+                  service_data:
+                    label: "P.SALA CASA"
+                    state: "open"
+              - type: 'custom:mushroom-button-card'
+                icon: mdi:door-closed
+                name: Chiudi
+                color: green
+                tap_action:
+                  action: call-service
+                  service: pysiaalarm.set_sensor_state
+                  service_data:
+                    label: "P.SALA CASA"
+                    state: "closed"
+              - type: 'custom:mushroom-button-card'
+                icon: mdi:backup-restore
+                name: Reset
+                color: gray
+                tap_action:
+                  action: call-service
+                  service: pysiaalarm.reset_sensor_state
+                  service_data:
+                    label: "P.SALA CASA"

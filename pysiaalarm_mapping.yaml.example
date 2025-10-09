@@ -11,13 +11,37 @@
 #     friendly_name: "Ingresso"
 
 default_debounce_seconds: 1.44
+default_debounce_seconds: 1.44
 sensors:
   "P.CUCINA     CASA":
-    debounce_seconds: 1.44
-    friendly_name: "Cucina"
-  "P.INGRESSO CASA":
-    debounce_seconds: 1.44
+    debounce_seconds: 0.2
+    friendly_name: "Finestra Cucina"
+    type: contact
+  "P.INGRESSO   CASA":
+    debounce_seconds: 0.44
     friendly_name: "Ingresso"
+    type: contact
   "P.SEMINTERRATOGARAGE":
     debounce_seconds: 1.44
-    friendly_name: "Garage"
+    friendly_name: "Porta Seminterrato"
+    type: contact
+  "P.SALA CASA":
+    debounce_seconds: 1.44
+    friendly_name: Finestrone Salotto
+    type: contact
+  "BASCULANTE GARAGE":
+    debounce_seconds: 1.44
+    friendly_name: Basculante Garage
+    type: contact
+  "F.BAGNO MATR.CASA":
+    debounce_seconds: 1.44
+    friendly_name: Bagno Camera Matrimoniale
+    type: contact
+  "F.MATRIMONIALECASA":
+    debounce_seconds: 1.44
+    friendly_name: Finestra Camera Matrimoniale
+    type: contact
+  "P.TERRAZZA   CASA":
+    debounce_seconds: 1.44
+    friendly_name: Terrazza Casa
+    type: contact
