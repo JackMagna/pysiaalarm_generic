@@ -1,0 +1,56 @@
+# pySIAAlarm Diagnostics Lovelace card
+# Copia questo file nella tua configurazione Lovelace (es: in "Raw configuration editor")
+# Modifica la lista `entities_to_monitor` con gli entity_id dei tuoi sensori pysiaalarm (binary_sensor o sensor)
+# Esempio di utilizzo:
+#  - include: !include helpers/ui_card_pysiaalarm_diagnostics.yaml
+# Poi inserisci le card generate dove vuoi.
+
+card:
+  type: vertical-stack
+  cards:
+    - type: markdown
+      title: pySIAAlarm - Diagnostics
+      content: |
+        ## pySIAAlarm diagnostics
+        Modifica `entities_to_monitor` nel file per elencare i sensori da monitorare.
+
+        {% set entities = states | selectattr('entity_id','in', entities_to_monitor) | list() %}
+
+        {% for ent_id in entities_to_monitor %}
+        - **{{ states[ent_id].name if states[ent_id] else ent_id }}**  
+          Confidence: `{{ state_attr(ent_id, 'predictor_confidence') }}`  
+          PredictState: `{{ state_attr(ent_id, 'predictor_state') }}`  
+          Confirm: `{{ state_attr(ent_id, 'predictor_confirm_count') }}/{{ state_attr(ent_id, 'predictor_confirm_required') }}`  
+
+        {% endfor %}
+
+    - type: horizontal-stack
+      cards:
+        - type: button
+          name: Apply global conservative params
+          icon: mdi:shield-check
+          tap_action:
+            action: call-service
+            service: pysiaalarm.set_predictor_params
+            service_data:
+              debounce_seconds: 1.5
+              window_size: 6
+              confidence_threshold: 0.8
+              confirm_required: 2
+        - type: button
+          name: Apply global responsive params
+          icon: mdi:run-fast
+          tap_action:
+            action: call-service
+            service: pysiaalarm.set_predictor_params
+            service_data:
+              debounce_seconds: 0.8
+              window_size: 4
+              confidence_threshold: 0.5
+              confirm_required: 1
+
+# Replace this list with the actual entity ids you want to monitor
+entities_to_monitor:
+  - binary_sensor.pysiaalarm_p_terrazza_casa
+  - binary_sensor.pysiaalarm_p_cucina_casa
+  - sensor.sia_known_codes_account

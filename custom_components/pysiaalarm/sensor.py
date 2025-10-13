@@ -12,12 +12,40 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .sia import SIAEvent
+import difflib
+import statistics
 import re
 # entity id generation: we'll sanitize labels ourselves
 
 from .const import DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
+
+
+def _normalize_label(s: str | None) -> str | None:
+    """Normalize labels for matching: collapse whitespace and uppercase.
+
+    Example: 'P.CUCINA     CASA' -> 'P.CUCINA CASA'
+    """
+    if s is None:
+        return None
+    try:
+        out = re.sub(r"\s+", ' ', s.strip())
+        return out.upper()
+    except Exception:
+        return s.strip().upper() if isinstance(s, str) else None
+
+
+def _similarity(a: str | None, b: str | None) -> float:
+    """Return similarity ratio between two normalized strings (0..1)."""
+    if not a or not b:
+        return 0.0
+    try:
+        a_n = _normalize_label(a)
+        b_n = _normalize_label(b)
+        return difflib.SequenceMatcher(None, a_n, b_n).ratio()
+    except Exception:
+        return 0.0
 
 
 async def async_setup_entry(
@@ -182,6 +210,62 @@ async def async_setup_entry(
         hass.services.async_register(DOMAIN, 'reset_sensor_state', _reset_sensor_state)
     except Exception:
         _LOGGER.debug('Impossibile registrare servizi set/reset sensor state', exc_info=True)
+
+    async def _set_predictor_params(call):
+        """Set predictor params for a sensor or globally.
+
+        Service data:
+          label: optional sensor label
+          code: optional sensor code
+          debounce_seconds, window_size, confidence_threshold, confirm_required
+        """
+        data = call.data or {}
+        label = data.get('label')
+        code = data.get('code')
+        debounce_seconds = data.get('debounce_seconds')
+        window_size = data.get('window_size')
+        confidence_threshold = data.get('confidence_threshold')
+        confirm_required = data.get('confirm_required')
+
+        if label:
+            ent = sia_data.entities_by_label.get(label)
+            if ent and hasattr(ent, 'set_predictor_params'):
+                try:
+                    ent.set_predictor_params(debounce_seconds, window_size, confidence_threshold, confirm_required)
+                    _LOGGER.info('Applied predictor params to label=%s', label)
+                except Exception as e:
+                    _LOGGER.error('Failed to apply predictor params to label=%s: %s', label, e)
+            else:
+                _LOGGER.error('No entity for label=%s or does not support predictor params', label)
+            return
+
+        if code:
+            ent = sia_data.entities_by_code.get(code)
+            if ent and hasattr(ent, 'set_predictor_params'):
+                try:
+                    ent.set_predictor_params(debounce_seconds, window_size, confidence_threshold, confirm_required)
+                    _LOGGER.info('Applied predictor params to code=%s', code)
+                except Exception as e:
+                    _LOGGER.error('Failed to apply predictor params to code=%s: %s', code, e)
+            else:
+                _LOGGER.error('No entity for code=%s or does not support predictor params', code)
+            return
+
+        # apply globally
+        applied = 0
+        for ent in list(sia_data.entities_by_label.values()) + list(sia_data.entities_by_code.values()):
+            if hasattr(ent, 'set_predictor_params'):
+                try:
+                    ent.set_predictor_params(debounce_seconds, window_size, confidence_threshold, confirm_required)
+                    applied += 1
+                except Exception:
+                    _LOGGER.debug('Failed applying predictor params to entity', exc_info=True)
+        _LOGGER.info('Applied predictor params to %d entities (global)', applied)
+
+    try:
+        hass.services.async_register(DOMAIN, 'set_predictor_params', _set_predictor_params)
+    except Exception:
+        _LOGGER.debug('Impossibile registrare servizio set_predictor_params', exc_info=True)
 
 
 class SIAEventMonitorSensor(SensorEntity):
@@ -398,6 +482,27 @@ class SIAEventCodeSensor(SensorEntity):
         self._last_raw_ts = None
         self._last_accepted_ts = None
 
+        # Predictor state for noisy repeated events
+        # window_size and confidence_threshold can be provided via mapping or fall back to integration defaults
+        try:
+            self._window_size = int(getattr(sia_data, 'default_window_size', 5))
+        except Exception:
+            self._window_size = 5
+        try:
+            self._confidence_threshold = float(getattr(sia_data, 'default_confidence_threshold', 0.66))
+        except Exception:
+            self._confidence_threshold = 0.66
+
+        # per-sensor circular buffer of recent raw matches: list of tuples (timestamp, accepted_bool)
+        self._recent = []
+        # internal predicted state: 'OPEN', 'CLOSE', or 'TRANSITION'
+        self._pred_state = 'CLOSE' if getattr(self, '_device_type', None) == 'contact' else 'UNKNOWN'
+        self._confidence = 0.0
+        # confirmation counter for TRANSITION -> OPEN/CLOSE
+        self._confirm_count = 0
+        # how many accepted events required to confirm a transition (can be tuned per-sensor)
+        self._confirm_required = int(getattr(sia_data, 'default_confirm_required', 1))
+
         # determine debounce seconds from mapping or default
         self._debounce = None
         if self._label and getattr(sia_data, 'mapping', None):
@@ -408,6 +513,15 @@ class SIAEventCodeSensor(SensorEntity):
                 self._debounce = float(sia_data.default_debounce_seconds)
             # detect device type (e.g., contact) from mapping metadata
             self._device_type = meta.get('type') if isinstance(meta, dict) else None
+            # override predictive params if provided per-sensor
+            try:
+                self._window_size = int(meta.get('window_size', self._window_size))
+            except Exception:
+                pass
+            try:
+                self._confidence_threshold = float(meta.get('confidence_threshold', self._confidence_threshold))
+            except Exception:
+                pass
         else:
             self._debounce = float(getattr(sia_data, 'default_debounce_seconds', 1.44))
             self._device_type = None
@@ -506,6 +620,14 @@ class SIAEventCodeSensor(SensorEntity):
             'last_raw_ts': self._last_raw_ts.isoformat() if self._last_raw_ts else None,
             'last_accepted_ts': self._last_accepted_ts.isoformat() if self._last_accepted_ts else None,
         }
+        # predictor diagnostics
+        try:
+            attrs['predictor_confidence'] = float(getattr(self, '_confidence', 0.0))
+            attrs['predictor_state'] = getattr(self, '_pred_state', None)
+            attrs['predictor_confirm_count'] = int(getattr(self, '_confirm_count', 0))
+            attrs['predictor_confirm_required'] = int(getattr(self, '_confirm_required', 1))
+        except Exception:
+            pass
         # expose manual override if present
         try:
             if hasattr(self, '_manual_state') and self._manual_state is not None:
@@ -538,49 +660,90 @@ class SIAEventCodeSensor(SensorEntity):
                 now = None
             if now is None:
                 now = datetime.now()
+        # record raw occurrence
         self._raw_count += 1
         self._last_raw_ts = now
 
-        last_acc = self._last_accepted_ts
-        allow = False
-        if last_acc is None:
-            allow = True
-        else:
-            diff = (now - last_acc).total_seconds()
-            if diff >= self._debounce:
-                allow = True
+        # Predictive filtering: we use a sliding window of recent raw events to compute confidence
+        # Each raw event is a potential toggle (for contacts) or increment for counters. We update
+        # the recent buffer and compute a confidence score based on density and time since last accepted.
+        try:
+            # compute allow based on traditional debounce first
+            last_acc = self._last_accepted_ts
+            allow_debounce = False
+            if last_acc is None:
+                allow_debounce = True
+            else:
+                diff = (now - last_acc).total_seconds()
+                if diff >= self._debounce:
+                    allow_debounce = True
 
-        if allow:
-            self._accepted_count += 1
-            self._last_accepted_ts = now
-            try:
-                now_iso = now.isoformat()
-            except Exception:
-                now_iso = str(now)
-            _LOGGER.info(
-                "SIA sensor match accepted: sensor=%s code=%s label=%s now=%s raw_count=%d accepted_count=%d",
-                (self._label or self._code), getattr(ev, 'code', None), label, now_iso, self._raw_count, self._accepted_count,
-            )
-            # schedule HA update
-            try:
-                # if device is contact, clear any automatic manual state? No: keep manual overrides
-                self.schedule_update_ha_state()
-            except Exception:
-                _LOGGER.debug("schedule_update_ha_state failed for %s", self._label or self._code)
-        else:
-            try:
-                now_iso = now.isoformat()
-            except Exception:
-                now_iso = str(now)
-            last_acc_iso = None
-            try:
-                last_acc_iso = self._last_accepted_ts.isoformat() if self._last_accepted_ts else None
-            except Exception:
-                last_acc_iso = str(self._last_accepted_ts)
-            _LOGGER.debug(
-                "SIA sensor match suppressed by debounce: sensor=%s code=%s label=%s now=%s last_accepted=%s debounce=%.2f",
-                (self._label or self._code), getattr(ev, 'code', None), label, now_iso, last_acc_iso, self._debounce,
-            )
+            # push into recent buffer; store 1 for raw (candidate), 0 if suppressed
+            self._recent.append((now, True))
+            # trim to window
+            if len(self._recent) > self._window_size:
+                self._recent.pop(0)
+
+            # compute a simple confidence: fraction of recent events that are spaced enough to be independent
+            # We consider pairwise gaps inside the window; large number of events packed tightly reduces confidence
+            gaps = []
+            for i in range(1, len(self._recent)):
+                try:
+                    gaps.append((self._recent[i][0] - self._recent[i-1][0]).total_seconds())
+                except Exception:
+                    pass
+            if gaps:
+                median_gap = statistics.median(gaps)
+            else:
+                median_gap = None
+
+            # derive confidence: normalized median gap vs debounce
+            if median_gap is None:
+                self._confidence = 1.0
+            else:
+                # if median gap >= debounce -> high confidence, else scale down
+                try:
+                    ratio = min(1.0, median_gap / max(0.0001, self._debounce))
+                    # apply sigmoid-like scaling
+                    self._confidence = float(ratio)
+                except Exception:
+                    self._confidence = 0.0
+
+            # Decision: accept if either debounce allows it OR confidence exceeds threshold
+            accept = allow_debounce or (self._confidence >= self._confidence_threshold)
+
+            if accept:
+                self._accepted_count += 1
+                self._last_accepted_ts = now
+                try:
+                    now_iso = now.isoformat()
+                except Exception:
+                    now_iso = str(now)
+                _LOGGER.info(
+                    "[predictor] %s: sensor=%s code=%s label=%s accepted (confidence=%.2f) now=%s raw_count=%d accepted_count=%d",
+                    '(code)' if self._code else '(label)', (self._label or self._code), getattr(ev, 'code', None), label, self._confidence, now_iso, self._raw_count, self._accepted_count,
+                )
+                # schedule HA update
+                try:
+                    self.schedule_update_ha_state()
+                except Exception:
+                    _LOGGER.debug("schedule_update_ha_state failed for %s", self._label or self._code)
+            else:
+                try:
+                    now_iso = now.isoformat()
+                except Exception:
+                    now_iso = str(now)
+                last_acc_iso = None
+                try:
+                    last_acc_iso = self._last_accepted_ts.isoformat() if self._last_accepted_ts else None
+                except Exception:
+                    last_acc_iso = str(self._last_accepted_ts)
+                _LOGGER.debug(
+                    "[predictor] %s: sensor=%s code=%s label=%s suppressed (confidence=%.2f) now=%s last_accepted=%s debounce=%.2f",
+                    '(code)' if self._code else '(label)', (self._label or self._code), getattr(ev, 'code', None), label, self._confidence, now_iso, last_acc_iso, self._debounce,
+                )
+        except Exception:
+            _LOGGER.debug("Predictor update failed for %s", self._label or self._code, exc_info=True)
 
     def _extract_label_from_event(self, ev: SIAEvent) -> str | None:
         """Try to extract bracket label or similar from event raw message."""
@@ -626,6 +789,22 @@ class SIAEventCodeSensor(SensorEntity):
         except Exception:
             return None
 
+    def set_predictor_params(self, debounce_seconds: float | None = None, window_size: int | None = None, confidence_threshold: float | None = None, confirm_required: int | None = None) -> None:
+        """Apply predictor params at runtime on this sensor instance."""
+        try:
+            if debounce_seconds is not None:
+                self._debounce = float(debounce_seconds)
+            if window_size is not None:
+                self._window_size = int(window_size)
+            if confidence_threshold is not None:
+                self._confidence_threshold = float(confidence_threshold)
+            if confirm_required is not None:
+                self._confirm_required = int(confirm_required)
+            _LOGGER.info("Predictor params updated for %s: debounce=%.2f window=%d conf=%.2f confirm=%d",
+                         self._label or self._code, float(getattr(self, '_debounce', 0)), int(getattr(self, '_window_size', 0)), float(getattr(self, '_confidence_threshold', 0)), int(getattr(self, '_confirm_required', 0)))
+        except Exception:
+            _LOGGER.debug("Failed to set predictor params for %s", self._label or self._code, exc_info=True)
+
     def _handle_event(self, ev: SIAEvent) -> None:
         """Listener called by SIAAlarmData for every event; filter and update counts."""
         try:
@@ -648,14 +827,30 @@ class SIAEventCodeSensor(SensorEntity):
                 except Exception:
                     _LOGGER.debug("SIA extracted label (logging failed) for sensor=%s", self._label, exc_info=True)
                 # compare normalized labels
-                def norm(s: str) -> str:
-                    return re.sub(r"\s+", ' ', s.strip()).lower()
+                # first try strict normalized match
+                sensor_norm = _normalize_label(self._label)
+                event_norm = _normalize_label(lbl)
+                sim = _similarity(sensor_norm, event_norm)
+                try:
+                    _LOGGER.debug("SIA label compare: sensor=%s event=%s similarity=%.2f", sensor_norm, event_norm, sim)
+                except Exception:
+                    pass
 
-                if norm(lbl) == norm(self._label):
-                    _LOGGER.debug("SIA label sensor matched: sensor_label=%s event_label=%s", self._label, lbl)
+                # accept if similarity is high enough or exact normalized match
+                if sim >= 0.95 or (sensor_norm and event_norm and sensor_norm == event_norm):
+                    _LOGGER.debug("SIA label sensor matched (exact/high-sim): sensor_label=%s event_label=%s sim=%.2f", self._label, lbl, sim)
                     self._update_on_event(ev, label=lbl)
+                elif sim >= 0.75:
+                    # borderline similarity: log and accept if predictor confidence high
+                    _LOGGER.debug("SIA label borderline similarity: sensor_label=%s event_label=%s sim=%.2f (will consult predictor)", self._label, lbl, sim)
+                    # consult predictor confidence: if predictor already has a confidence estimate for this sensor, use it
+                    if getattr(self, '_confidence', 0.0) >= getattr(self, '_confidence_threshold', 0.66):
+                        _LOGGER.debug("SIA label borderline accepted by predictor: %s (confidence=%.2f)", self._label, self._confidence)
+                        self._update_on_event(ev, label=lbl)
+                    else:
+                        _LOGGER.debug("SIA label borderline rejected by predictor: %s (confidence=%.2f)", self._label, self._confidence)
                 else:
-                    _LOGGER.debug("SIA label mismatch: sensor_label=%s event_label=%s", self._label, lbl)
+                    _LOGGER.debug("SIA label mismatch: sensor_label=%s event_label=%s sim=%.2f", self._label, lbl, sim)
         except Exception:
             _LOGGER.debug("Errore matching evento per sensore SIA %s", self._label or self._code)
 
@@ -740,6 +935,30 @@ class SIAEventBinarySensor(BinarySensorEntity):
         except Exception:
             self._initial_state = None
 
+        # Predictor params
+        try:
+            self._window_size = int(getattr(sia_data, 'default_window_size', 5))
+        except Exception:
+            self._window_size = 5
+        try:
+            self._confidence_threshold = float(getattr(sia_data, 'default_confidence_threshold', 0.66))
+        except Exception:
+            self._confidence_threshold = 0.66
+        # allow per-sensor meta overrides
+        if meta and isinstance(meta, dict):
+            try:
+                self._window_size = int(meta.get('window_size', self._window_size))
+            except Exception:
+                pass
+            try:
+                self._confidence_threshold = float(meta.get('confidence_threshold', self._confidence_threshold))
+            except Exception:
+                pass
+
+        # predictive state
+        self._recent = []
+        self._confidence = 0.0
+
     @property
     def name(self) -> str:
         if self._label:
@@ -801,6 +1020,22 @@ class SIAEventBinarySensor(BinarySensorEntity):
             'last_accepted_ts': self._last_accepted_ts.isoformat() if self._last_accepted_ts else None,
         }
 
+    def set_predictor_params(self, debounce_seconds: float | None = None, window_size: int | None = None, confidence_threshold: float | None = None, confirm_required: int | None = None) -> None:
+        """Apply predictor params at runtime on this binary sensor instance."""
+        try:
+            if debounce_seconds is not None:
+                self._debounce = float(debounce_seconds)
+            if window_size is not None:
+                self._window_size = int(window_size)
+            if confidence_threshold is not None:
+                self._confidence_threshold = float(confidence_threshold)
+            if confirm_required is not None:
+                self._confirm_required = int(confirm_required)
+            _LOGGER.info("Predictor params updated for contact %s: debounce=%.2f window=%d conf=%.2f confirm=%d",
+                         self._label or self._code, float(getattr(self, '_debounce', 0)), int(getattr(self, '_window_size', 0)), float(getattr(self, '_confidence_threshold', 0)), int(getattr(self, '_confirm_required', 0)))
+        except Exception:
+            _LOGGER.debug("Failed to set predictor params for contact %s", self._label or self._code, exc_info=True)
+
     def _update_on_event(self, ev: SIAEvent) -> None:
         from datetime import datetime
         ts = getattr(ev, 'timestamp', None)
@@ -818,22 +1053,54 @@ class SIAEventBinarySensor(BinarySensorEntity):
         self._raw_count += 1
         self._last_raw_ts = now
 
-        last_acc = self._last_accepted_ts
-        allow = False
-        if last_acc is None:
-            allow = True
-        else:
-            diff = (now - last_acc).total_seconds()
-            if diff >= self._debounce:
-                allow = True
+        # predictive approach: update recent window and compute median gap
+        try:
+            last_acc = self._last_accepted_ts
+            allow_debounce = False
+            if last_acc is None:
+                allow_debounce = True
+            else:
+                diff = (now - last_acc).total_seconds()
+                if diff >= self._debounce:
+                    allow_debounce = True
 
-        if allow:
-            self._accepted_count += 1
-            self._last_accepted_ts = now
-            try:
-                self.schedule_update_ha_state()
-            except Exception:
-                pass
+            self._recent.append(now)
+            if len(self._recent) > self._window_size:
+                self._recent.pop(0)
+
+            gaps = []
+            for i in range(1, len(self._recent)):
+                try:
+                    gaps.append((self._recent[i] - self._recent[i-1]).total_seconds())
+                except Exception:
+                    pass
+            if gaps:
+                median_gap = statistics.median(gaps)
+            else:
+                median_gap = None
+
+            if median_gap is None:
+                self._confidence = 1.0
+            else:
+                try:
+                    self._confidence = min(1.0, median_gap / max(0.0001, self._debounce))
+                except Exception:
+                    self._confidence = 0.0
+
+            accept = allow_debounce or (self._confidence >= self._confidence_threshold)
+            if accept:
+                self._accepted_count += 1
+                self._last_accepted_ts = now
+                try:
+                    _LOGGER.info("[predictor] %s: %s state toggled (confidence=%.2f) raw=%d acc=%d",
+                                 self._label or self._code, self._code or self._label, self._confidence, self._raw_count, self._accepted_count)
+                    self.schedule_update_ha_state()
+                except Exception:
+                    pass
+            else:
+                _LOGGER.debug("[predictor] %s: event suppressed by predictor (confidence=%.2f) raw=%d acc=%d", self._label or self._code, self._confidence, self._raw_count, self._accepted_count)
+        except Exception:
+            _LOGGER.debug("Predictive update failed for contact %s", self._label or self._code, exc_info=True)
 
     def _extract_label_from_event(self, ev: SIAEvent) -> str | None:
         # reuse parent extraction logic
@@ -861,7 +1128,7 @@ class SIAEventBinarySensor(BinarySensorEntity):
             if pidx != -1:
                 candidate = candidate[pidx:]
             else:
-                candidate = re.sub(r'^[A-Z]\.]\s*', '', candidate)
+                candidate = re.sub(r'^[A-Z]\.\s*', '', candidate)
             candidate = re.sub(r"\s+", ' ', candidate).strip()
             return candidate
         except Exception:
@@ -878,11 +1145,20 @@ class SIAEventBinarySensor(BinarySensorEntity):
                 lbl = self._extract_label_from_event(ev)
                 if not lbl:
                     return
-                def norm(s: str) -> str:
-                    return re.sub(r"\s+", ' ', s.strip()).lower()
-                if norm(lbl) == norm(self._label):
+                sensor_norm = _normalize_label(self._label)
+                event_norm = _normalize_label(lbl)
+                sim = _similarity(sensor_norm, event_norm)
+                _LOGGER.debug("SIA contact label compare: sensor=%s event=%s sim=%.2f", sensor_norm, event_norm, sim)
+                if sim >= 0.95 or (sensor_norm and event_norm and sensor_norm == event_norm):
                     _LOGGER.debug("SIA contact label matched: %s", self._label)
                     self._update_on_event(ev)
+                elif sim >= 0.75:
+                    # borderline -- accept only if confidence high
+                    if getattr(self, '_confidence', 0.0) >= getattr(self, '_confidence_threshold', 0.66):
+                        _LOGGER.debug("SIA contact borderline accepted by predictor: %s (confidence=%.2f)", self._label, self._confidence)
+                        self._update_on_event(ev)
+                    else:
+                        _LOGGER.debug("SIA contact borderline rejected by predictor: %s (confidence=%.2f)", self._label, self._confidence)
         except Exception:
             _LOGGER.debug("Errore matching evento per contact %s", self._label or self._code)
 

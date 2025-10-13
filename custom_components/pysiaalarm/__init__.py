@@ -24,6 +24,13 @@ try:
 except Exception:
     yaml = None
 
+# try to import aiofiles for async file IO; if not available we'll fallback to
+# running blocking IO in an executor (off the event loop)
+try:
+    import aiofiles
+except Exception:
+    aiofiles = None
+
 _LOGGER = logging.getLogger(__name__)
 
 PLATFORMS = [Platform.SENSOR]
@@ -169,11 +176,31 @@ class SIAAlarmData:
         try:
             conf_path = hass.config.path('pysiaalarm_mapping.yaml')
             if os.path.exists(conf_path) and yaml is not None:
-                with open(conf_path, 'r', encoding='utf-8') as f:
-                    cfg = yaml.safe_load(f) or {}
+                # Prefer aiofiles for non-blocking IO when available
+                cfg = None
+                if aiofiles is not None:
+                    try:
+                        async with aiofiles.open(conf_path, 'r', encoding='utf-8') as f:  # type: ignore
+                            content = await f.read()
+                            cfg = yaml.safe_load(content) or {}
+                    except Exception as e:
+                        _LOGGER.debug("Errore lettura mapping async: %s", e)
+                else:
+                    # fallback: run blocking IO in executor to avoid event-loop blocking
+                    try:
+                        def _read_file(path):
+                            with open(path, 'r', encoding='utf-8') as _f:
+                                return _f.read()
+                        content = await hass.async_add_executor_job(_read_file, conf_path)
+                        cfg = yaml.safe_load(content) or {}
+                    except Exception as e:
+                        _LOGGER.debug("Errore lettura mapping sync in executor: %s", e)
+
+                try:
                     # expected format: { sensors: { '<label>': { debounce_seconds: 1.2, friendly_name: '...' } } }
                     sensors = cfg.get('sensors') if isinstance(cfg, dict) else None
                     if sensors and isinstance(sensors, dict):
+                        # store mapping as-is; entities will normalize keys when matching
                         self.mapping = sensors
                         _LOGGER.info("Mappatura sensori pySIAAlarm caricata da %s", conf_path)
                         # if user provided a global default debounce
@@ -182,6 +209,17 @@ class SIAAlarmData:
                                 self.default_debounce_seconds = float(cfg.get('default_debounce_seconds'))
                             except Exception:
                                 pass
+                        # optional predictive params
+                        try:
+                            self.default_window_size = int(cfg.get('default_window_size', 5))
+                        except Exception:
+                            self.default_window_size = 5
+                        try:
+                            self.default_confidence_threshold = float(cfg.get('default_confidence_threshold', 0.66))
+                        except Exception:
+                            self.default_confidence_threshold = 0.66
+                except Exception as e:
+                    _LOGGER.debug("Errore parsing mapping: %s", e)
         except Exception as e:
             _LOGGER.debug("Nessuna mapping file o errore caricamento mapping: %s", e)
 
