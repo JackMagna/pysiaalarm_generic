@@ -141,6 +141,22 @@ class SIAServerTCP:
                         if code_search:
                             ev.code = code_search.group(1)
 
+                        # Special handling for Nri<part><Code><Zone> format (e.g. Nri1UX12)
+                        # This overrides the generic 3-digit code search if found
+                        special_match = re.search(r"Nri(\d+)([A-Z]{2})(\d+)", content)
+                        if special_match:
+                            # partition = special_match.group(1)
+                            code_str = special_match.group(2)
+                            zone_str = special_match.group(3)
+                            # Construct a unique code for this sensor
+                            ev.code = f"{code_str}-{zone_str}"
+                            # Use zone as RI for consistency
+                            ev.ri = zone_str 
+                            try:
+                                setattr(ev, 'zone', int(zone_str))
+                            except Exception:
+                                pass
+
                         # try to find 'ri' zone pattern (e.g. 'Nri1' -> zone 1)
                         ri_search = re.search(r"[Rr]?i(\d+)", content)
                         if ri_search:

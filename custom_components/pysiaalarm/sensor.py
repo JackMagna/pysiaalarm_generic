@@ -205,9 +205,25 @@ async def async_setup_entry(
         except Exception:
             pass
 
+    async def _reset_all_toggles(call):
+        """Service to reset all toggle sensors to closed."""
+        count = 0
+        # Reset code-based sensors
+        for ent in sia_data.entities_by_code.values():
+            if hasattr(ent, 'reset_toggle'):
+                ent.reset_toggle()
+                count += 1
+        # Reset label-based sensors
+        for ent in sia_data.entities_by_label.values():
+            if hasattr(ent, 'reset_toggle'):
+                ent.reset_toggle()
+                count += 1
+        _LOGGER.info("Reset toggle state for %d sensors", count)
+
     try:
         hass.services.async_register(DOMAIN, 'set_sensor_state', _set_sensor_state)
         hass.services.async_register(DOMAIN, 'reset_sensor_state', _reset_sensor_state)
+        hass.services.async_register(DOMAIN, 'reset_all_toggles', _reset_all_toggles)
     except Exception:
         _LOGGER.debug('Impossibile registrare servizi set/reset sensor state', exc_info=True)
 
@@ -526,6 +542,10 @@ class SIAEventCodeSensor(SensorEntity):
             self._debounce = float(getattr(sia_data, 'default_debounce_seconds', 1.44))
             self._device_type = None
 
+        # Auto-detect contact type for special codes (e.g. UX-12)
+        if self._code and '-' in self._code:
+             self._device_type = 'contact'
+
         # entity_id generation if label provided
         self._entity_id = None
         if self._label:
@@ -604,9 +624,9 @@ class SIAEventCodeSensor(SensorEntity):
             pass
         # otherwise return accepted_count for numeric sensors
         if self._device_type == 'contact':
-            # convert accepted_count (int) to human state 'closed' if 0 else 'open'
+            # Toggle logic: Even = Closed, Odd = Open
             try:
-                return 'open' if self._accepted_count > 0 else 'closed'
+                return 'open' if (self._accepted_count % 2) != 0 else 'closed'
             except Exception:
                 return 'closed'
         return self._accepted_count
@@ -642,6 +662,11 @@ class SIAEventCodeSensor(SensorEntity):
                 'samples': entry.get('samples', []),
             })
         return attrs
+
+    def reset_toggle(self) -> None:
+        """Reset the toggle counter to 0 (Closed)."""
+        self._accepted_count = 0
+        self.schedule_update_ha_state()
 
     def _update_on_event(self, ev: SIAEvent, label: str | None = None) -> None:
         """Called by SIAEvent listeners: update counts and apply debounce."""
@@ -1035,6 +1060,11 @@ class SIAEventBinarySensor(BinarySensorEntity):
                          self._label or self._code, float(getattr(self, '_debounce', 0)), int(getattr(self, '_window_size', 0)), float(getattr(self, '_confidence_threshold', 0)), int(getattr(self, '_confirm_required', 0)))
         except Exception:
             _LOGGER.debug("Failed to set predictor params for contact %s", self._label or self._code, exc_info=True)
+
+    def reset_toggle(self) -> None:
+        """Reset the toggle counter to 0 (Closed)."""
+        self._accepted_count = 0
+        self.schedule_update_ha_state()
 
     def _update_on_event(self, ev: SIAEvent) -> None:
         from datetime import datetime
