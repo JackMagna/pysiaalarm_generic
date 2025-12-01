@@ -320,3 +320,41 @@ L'integrazione ora processa correttamente eventi SIA reali:
 - ✅ **Test integrazione** - Script per validare configurazione
 
 **Prossimo obiettivo**: FASE 2 - Mappatura eventi UX e altri codici ai sensori casa specifici.
+
+---
+
+### 🎄 DICEMBRE 2025 - AGGIORNAMENTO FUNZIONALITÀ
+
+**Obiettivo**: Stabilizzare l'integrazione per sensori di contatto (porte/finestre) che inviano burst di messaggi e richiedono logica toggle.
+
+**Funzionalità Implementate:**
+
+1.  **✅ Adaptive Debounce (Debounce Adattivo)**
+    *   **Problema**: I sensori inviano raffiche (burst) di 4-5 messaggi identici in pochi millisecondi. A volte i burst "perdono" colpi (leaks) arrivando appena fuori dalla finestra di debounce standard.
+    *   **Soluzione**: Nuova classe `AdaptiveDebounce` in `sensor.py`.
+        *   Filtra burst entro una finestra iniziale (default 1.0s).
+        *   Rileva "leaks" (eventi appena fuori finestra, es. 1.1s) e li ignora.
+        *   **Auto-apprendimento**: Se rileva un leak, espande automaticamente la finestra per quel sensore (fino a 5.0s) per coprire i futuri burst.
+    *   **Risultato**: Eliminati falsi toggle (apri/chiudi immediati) causati da hardware rumoroso.
+
+2.  **✅ Logica Toggle (Even/Odd)**
+    *   **Problema**: I sensori inviano lo stesso codice sia per apertura che per chiusura.
+    *   **Soluzione**: Implementata logica basata sul conteggio eventi.
+        *   Conteggio Pari = **Closed**
+        *   Conteggio Dispari = **Open**
+    *   **Stato**: Attivo per sensori configurati come `type: contact`.
+
+3.  **✅ Servizio Reset Toggle**
+    *   **Problema**: Possibile desincronizzazione (es. riavvio HA mentre porta aperta).
+    *   **Soluzione**: Nuovo metodo `reset_toggle()` esposto come servizio.
+    *   **Uso**: Permette di forzare lo stato a "Closed" (conteggio 0) manualmente o via automazione.
+
+4.  **✅ Parsing Regex Migliorato**
+    *   **Problema**: Alcuni codici (es. `Nri1UX12`) non venivano parsati correttamente.
+    *   **Soluzione**: Aggiornata regex in `server.py` per gestire prefissi opzionali e formati non standard.
+    *   **Risultato**: Codici come `UX` e zone come `12` vengono estratti correttamente.
+
+**Stato Attuale**:
+*   Il sistema è ora robusto contro i "rimbalzi" dei sensori fisici.
+*   La logica di stato è coerente (Toggle).
+*   L'adattamento automatico riduce la necessità di configurazione manuale dei tempi di debounce.

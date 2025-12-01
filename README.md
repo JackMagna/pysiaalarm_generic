@@ -178,6 +178,9 @@ Le modifiche più recenti incluse in questa fork / integrazione standalone:
 - Avvio/stop export periodico (start_auto_export / stop_auto_export)
 - Nome file di export con timestamp (formato: `pysiaalarm_codes_YYYYMMDD_HHMMSS.csv`) per evitare sovrascritture
 - Aumento del numero di sample conservati per codice (fino a 50) per analisi
+- **Adaptive Debounce**: Algoritmo intelligente che filtra i burst di messaggi e adatta automaticamente la finestra di debounce se rileva "leaks" (eventi ritardati).
+- **Logica Toggle**: Supporto nativo per sensori a stato singolo (stesso codice per Open/Close) tramite conteggio eventi (Pari=Chiuso, Dispari=Aperto).
+- **Parsing Avanzato**: Supporto migliorato per codici non standard (es. `UX-12`) e formati HESA complessi.
 
 ## Verifica dei servizi in Home Assistant — guida passo-passo
 

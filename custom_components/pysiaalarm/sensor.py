@@ -2,8 +2,10 @@
 from __future__ import annotations
 
 import logging
+import time
 from typing import Any
 from datetime import datetime
+from dataclasses import dataclass, field
 
 from homeassistant.components.sensor import SensorEntity
 from homeassistant.components.binary_sensor import BinarySensorEntity
@@ -515,6 +517,61 @@ class SIAKnownCodesSensor(SensorEntity):
         return {"codes": list(self._sia_data.codes.keys())}
 
 
+@dataclass
+class AdaptiveDebounce:
+    """
+    Gestisce il debounce adattivo per filtrare burst di messaggi identici.
+    
+    Logica:
+    1. Ignora eventi che arrivano troppo presto dopo l'ultimo accettato (window).
+    2. Se rileva un 'leak' (evento appena fuori window ma parte di un burst),
+       incrementa temporaneamente la window per adattarsi al dispositivo.
+    3. Ritorna True se l'evento deve essere processato (toggle), False se ignorato.
+    """
+    initial_window: float = 1.0  # Finestra base (es. 1 secondo)
+    max_window: float = 5.0      # Limite massimo adattamento
+    increment: float = 0.5       # Quanto aumentare se rileviamo leak
+    
+    _last_accepted: float = 0.0
+    _current_window: float = field(init=False)
+    _leak_count: int = 0
+
+    def __post_init__(self):
+        self._current_window = self.initial_window
+
+    def process_event(self) -> bool:
+        now = time.time()
+        delta = now - self._last_accepted
+        
+        # 1. Se siamo DENTRO la finestra -> Ignora (Burst)
+        if delta < self._current_window:
+            return False
+            
+        # 2. Se siamo APPENA FUORI (es. 1.1s su window 1.0s) -> Probabile Leak
+        # Definiamo "appena fuori" come entro 0.5s extra della window
+        is_leak = delta < (self._current_window + 0.5)
+        
+        if is_leak:
+            # È un leak! Adattiamo la finestra
+            old_window = self._current_window
+            self._current_window = min(self.max_window, delta + self.increment)
+            self._leak_count += 1
+            _LOGGER.warning(
+                f"AdaptiveDebounce: Leak detected (delta={delta:.3f}s). "
+                f"Increasing window {old_window:.2f}s -> {self._current_window:.2f}s"
+            )
+            # Non accettiamo il leak come nuovo evento valido, lo consideriamo coda del precedente
+            # Aggiorniamo timestamp per estendere la protezione
+            self._last_accepted = now
+            return False
+            
+        # 3. Evento valido (fuori window e non leak)
+        self._last_accepted = now
+        # Opzionale: Rilassamento lento della window verso initial se passa molto tempo?
+        # Per ora manteniamo conservativo (window rimane larga se il sensore è rumoroso)
+        return True
+
+
 class SIAEventCodeSensor(SensorEntity):
     """Sensor per codice o label SIA con debounce e diagnostica.
 
@@ -527,6 +584,9 @@ class SIAEventCodeSensor(SensorEntity):
         self._config_entry = config_entry
         self._code = str(code) if code is not None else None
         self._label = label if label else None
+
+        # Initialize Adaptive Debouncer
+        self.debouncer = AdaptiveDebounce()
 
         # diagnostic counts
         self._raw_count = 0
@@ -725,86 +785,20 @@ class SIAEventCodeSensor(SensorEntity):
         self._raw_count += 1
         self._last_raw_ts = now
 
-        # Predictive filtering: we use a sliding window of recent raw events to compute confidence
-        # Each raw event is a potential toggle (for contacts) or increment for counters. We update
-        # the recent buffer and compute a confidence score based on density and time since last accepted.
-        try:
-            # compute allow based on traditional debounce first
-            last_acc = self._last_accepted_ts
-            allow_debounce = False
-            if last_acc is None:
-                allow_debounce = True
-            else:
-                diff = (now - last_acc).total_seconds()
-                if diff >= self._debounce:
-                    allow_debounce = True
-
-            # push into recent buffer; store 1 for raw (candidate), 0 if suppressed
-            self._recent.append((now, True))
-            # trim to window
-            if len(self._recent) > self._window_size:
-                self._recent.pop(0)
-
-            # compute a simple confidence: fraction of recent events that are spaced enough to be independent
-            # We consider pairwise gaps inside the window; large number of events packed tightly reduces confidence
-            gaps = []
-            for i in range(1, len(self._recent)):
-                try:
-                    gaps.append((self._recent[i][0] - self._recent[i-1][0]).total_seconds())
-                except Exception:
-                    pass
-            if gaps:
-                median_gap = statistics.median(gaps)
-            else:
-                median_gap = None
-
-            # derive confidence: normalized median gap vs debounce
-            if median_gap is None:
-                self._confidence = 1.0
-            else:
-                # if median gap >= debounce -> high confidence, else scale down
-                try:
-                    ratio = min(1.0, median_gap / max(0.0001, self._debounce))
-                    # apply sigmoid-like scaling
-                    self._confidence = float(ratio)
-                except Exception:
-                    self._confidence = 0.0
-
-            # Decision: accept if either debounce allows it OR confidence exceeds threshold
-            accept = allow_debounce or (self._confidence >= self._confidence_threshold)
-
-            if accept:
-                self._accepted_count += 1
-                self._last_accepted_ts = now
-                try:
-                    now_iso = now.isoformat()
-                except Exception:
-                    now_iso = str(now)
-                _LOGGER.info(
-                    "[predictor] %s: sensor=%s code=%s label=%s accepted (confidence=%.2f) now=%s raw_count=%d accepted_count=%d",
-                    '(code)' if self._code else '(label)', (self._label or self._code), getattr(ev, 'code', None), label, self._confidence, now_iso, self._raw_count, self._accepted_count,
-                )
-                # schedule HA update
-                try:
-                    self.schedule_update_ha_state()
-                except Exception:
-                    _LOGGER.debug("schedule_update_ha_state failed for %s", self._label or self._code)
-            else:
-                try:
-                    now_iso = now.isoformat()
-                except Exception:
-                    now_iso = str(now)
-                last_acc_iso = None
-                try:
-                    last_acc_iso = self._last_accepted_ts.isoformat() if self._last_accepted_ts else None
-                except Exception:
-                    last_acc_iso = str(self._last_accepted_ts)
-                _LOGGER.debug(
-                    "[predictor] %s: sensor=%s code=%s label=%s suppressed (confidence=%.2f) now=%s last_accepted=%s debounce=%.2f",
-                    '(code)' if self._code else '(label)', (self._label or self._code), getattr(ev, 'code', None), label, self._confidence, now_iso, last_acc_iso, self._debounce,
-                )
-        except Exception:
-            _LOGGER.debug("Predictor update failed for %s", self._label or self._code, exc_info=True)
+        # Use Adaptive Debounce
+        if self.debouncer.process_event():
+            self._accepted_count += 1
+            self._last_accepted_ts = now
+            _LOGGER.info(
+                "[AdaptiveDebounce] %s: sensor=%s code=%s label=%s ACCEPTED. raw_count=%d accepted_count=%d",
+                '(code)' if self._code else '(label)', (self._label or self._code), getattr(ev, 'code', None), label, self._raw_count, self._accepted_count,
+            )
+            self.schedule_update_ha_state()
+        else:
+            _LOGGER.debug(
+                "[AdaptiveDebounce] %s: sensor=%s code=%s label=%s IGNORED (Burst/Leak). raw_count=%d",
+                '(code)' if self._code else '(label)', (self._label or self._code), getattr(ev, 'code', None), label, self._raw_count,
+            )
 
     def _extract_label_from_event(self, ev: SIAEvent) -> str | None:
         """Try to extract bracket label or similar from event raw message."""
