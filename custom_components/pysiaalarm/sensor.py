@@ -123,6 +123,42 @@ async def async_setup_entry(
             if getattr(sia_data, 'mapping', None):
                 # mapping keys are labels; we do not have a reverse map here, so just create code-based sensor
                 label = None
+            
+            # Try to extract label from stored sample if available
+            if not label and sia_data.codes and code in sia_data.codes:
+                try:
+                    entry = sia_data.codes[code]
+                    samples = entry.get('samples', [])
+                    if samples:
+                        raw = samples[0]
+                        # Extract label logic similar to sensor class
+                        m = re.search(r"\[(.*?)\]", raw)
+                        if m:
+                            bracket = m.group(1).strip()
+                            candidate = bracket
+                            if '^' in bracket:
+                                parts = bracket.split('^')
+                                if len(parts) >= 2 and parts[1].strip():
+                                    candidate = parts[1].strip()
+                                else:
+                                    cand = [p for p in parts if p.strip()]
+                                    candidate = cand[-1].strip() if cand else bracket
+                            elif '|' in bracket:
+                                candidate = bracket.split('|', 1)[-1].strip()
+                            
+                            # Cleanup prefixes
+                            pidx = candidate.find('P.')
+                            if pidx != -1:
+                                candidate = candidate[pidx:]
+                            else:
+                                candidate = re.sub(r'^[A-Z]\.\s*', '', candidate)
+                            
+                            candidate = re.sub(r"\s+", ' ', candidate).strip()
+                            if candidate:
+                                label = candidate
+                except Exception:
+                    pass
+
             ent = SIAEventCodeSensor(sia_data, config_entry, code=code, label=label)
             async_add_entities([ent])
             # Log detailed info about created dynamic sensor

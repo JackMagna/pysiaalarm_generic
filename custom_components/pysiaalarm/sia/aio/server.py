@@ -143,7 +143,8 @@ class SIAServerTCP:
 
                         # Special handling for Nri<part><Code><Zone> format (e.g. Nri1UX12)
                         # This overrides the generic 3-digit code search if found
-                        special_match = re.search(r"Nri(\d+)([A-Z]{2})(\d+)", content)
+                        # Regex handles optional N prefix and case-insensitive ri
+                        special_match = re.search(r"[Nn]?[Rr]?i(\d+)([A-Z]{2})(\d+)", content)
                         if special_match:
                             # partition = special_match.group(1)
                             code_str = special_match.group(2)
@@ -168,6 +169,18 @@ class SIAServerTCP:
                                 setattr(ev, 'zone', ev.ri)
                 except Exception as err:  # pragma: no cover - defensive
                     _LOGGER.debug("Non è stato possibile estrarre codice/zone dal messaggio: %s", err)
+
+                # Try to parse timestamp from message tail: _HH:MM:SS,MM-DD-YYYY
+                # Example: _12:04:29,11-27-2025
+                ts_match = re.search(r"_(\d{2}:\d{2}:\d{2}),(\d{2}-\d{2}-\d{4})", message)
+                if ts_match:
+                    try:
+                        ts_str = f"{ts_match.group(2)} {ts_match.group(1)}"
+                        # MM-DD-YYYY HH:MM:SS
+                        parsed_ts = datetime.strptime(ts_str, "%m-%d-%Y %H:%M:%S")
+                        ev.timestamp = parsed_ts
+                    except Exception:
+                        pass
 
                 return ev
 
